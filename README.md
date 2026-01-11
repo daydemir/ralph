@@ -69,11 +69,12 @@ claude --version
 
 Before running Ralph, use Claude Code as your product manager to plan PRDs:
 
-1. **Start Claude Code** in your ralph directory:
+1. **Start Claude Code** in your workspace (the parent folder containing ralph and your repos):
    ```bash
-   cd ralph
+   cd ~/projects    # The folder containing ralph/, my-app/, etc.
    claude
    ```
+   This lets Claude explore all your repos when planning PRDs.
 
 2. **Describe what you want to build:**
    ```
