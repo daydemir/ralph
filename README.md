@@ -2,9 +2,10 @@
 
 Autonomous PRD execution loop for [Claude Code](https://claude.ai/code).
 
-> **Warning: Ralph runs with auto-accept enabled**
+> [!CAUTION]
+> **Ralph runs with auto-accept enabled**
 >
-> Ralph scripts run Claude Code with all tools enabled and changes auto-accepted (no confirmation prompts). This means:
+> Ralph scripts run Claude Code with **all tools enabled** and **changes auto-accepted** (no confirmation prompts). This means:
 > - File edits happen immediately without review
 > - Commands execute without asking permission
 > - Git commits are made automatically
