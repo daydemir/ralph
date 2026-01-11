@@ -73,13 +73,13 @@ BEGIN { tools = 0 }
 }
 /^TEXT:/ {
   text = substr($0, 6)
-  timestamp = strftime("[%H:%M:%S]")
-  if (tools > 0) { printf "%s [Tools: %d] %s\n", timestamp, tools, text; tools = 0 }
-  else { printf "%s %s\n", timestamp, text }
+  "date +[%H:%M:%S]" | getline ts; close("date +[%H:%M:%S]")
+  if (tools > 0) { printf "%s [Tools: %d] %s\n", ts, tools, text; tools = 0 }
+  else { printf "%s %s\n", ts, text }
 }
 /^DONE:/ {
-  timestamp = strftime("[%H:%M:%S]")
-  printf "%s [Done] %s...\n", timestamp, substr($0, 6)
+  "date +[%H:%M:%S]" | getline ts; close("date +[%H:%M:%S]")
+  printf "%s [Done] %s...\n", ts, substr($0, 6)
 }
 END { if (tools > 0) printf "[Final tools: %d]\n", tools }
 '
