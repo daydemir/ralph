@@ -209,24 +209,52 @@ This signals to the user that manual action is needed before proceeding.
 
 ## Context Optimization
 
-Ralph runs autonomously and can exhaust context on large tasks. Be defensive about context usage:
+Ralph runs autonomously and can exhaust context. **Aggressively use cheaper models.**
 
-### Model Selection for Subagents
+### Model Selection Rules
 
-Use the lightest model that can accomplish the task:
+| Task | Model | Why |
+|------|-------|-----|
+| File search, grep, glob | `haiku` | No reasoning needed |
+| Reading files | `haiku` | Just fetching content |
+| Writing tests | `haiku` | Following existing patterns, PRD defines behavior |
+| Simple code edits | `haiku` | Clear changes from PRD steps |
+| Running builds | `haiku` | Execute and report |
+| Git operations | `haiku` | Straightforward commands |
+| Updating prd.json, progress.txt | `haiku` | Mechanical updates |
+| Implementation with patterns | `sonnet` | Needs codebase understanding |
+| Debugging (first 2 attempts) | `sonnet` | Analyze errors |
+| Debugging (3+ failures) | `opus` | Complex root cause analysis |
+| Architecture decisions | `opus` | Novel design choices |
+| Ambiguous requirements | `opus` | Needs clarification reasoning |
 
-| Task Type | Recommended Model | Rationale |
-|-----------|-------------------|-----------|
-| File search, grep, simple reads | `haiku` | Fast, cheap, sufficient |
-| Code exploration, pattern finding | `haiku` or `sonnet` | Usually straightforward |
-| Complex implementation, debugging | `sonnet` | Default, balanced |
-| Architecture decisions, complex reasoning | `opus` | Only when needed |
+### Default Behavior
 
-### When launching Task agents:
+- **Main Ralph model is Sonnet** - follows PROMPT.md, spawns subagents
+- **Default subagent is Haiku** - unless task requires more
+- **Escalate to Opus only when stuck** - after 2-3 failed attempts
 
-- **Default to haiku** for exploration and research tasks
-- **Use sonnet** for implementation that requires understanding context
-- **Reserve opus** for complex multi-step reasoning or architectural decisions
+### Task Agent Examples
+
+```
+# Haiku - simple tasks
+Task(subagent_type="Explore", model="haiku", prompt="Find files matching *.swift in ar/")
+Task(subagent_type="Bash", model="haiku", prompt="Run npm test and report results")
+
+# Sonnet - implementation
+Task(subagent_type="ios-swift-expert", model="sonnet", prompt="Implement the login flow per PRD steps")
+
+# Opus - only when needed
+Task(subagent_type="bug-fix-architect", model="opus", prompt="Debug this failure after 3 attempts...")
+```
+
+### When to Escalate
+
+Escalate to a more powerful model when:
+1. Task fails 2+ times with current model
+2. Error messages are ambiguous or misleading
+3. Multiple interconnected systems need coordination
+4. PRD steps are vague and need interpretation
 
 ### Context-Saving Practices
 

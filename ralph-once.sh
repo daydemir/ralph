@@ -15,7 +15,7 @@ fi
 
 echo "=== Ralph interactive session (human-in-loop) ==="
 echo ""
-"$CLAUDE_CMD" \
+"$CLAUDE_CMD" --model sonnet \
   "$(cat PROMPT.md)" \
   --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Task,TodoWrite,WebFetch,WebSearch" \
   prd.json progress.txt fix_plan.md CODEBASE-MAP.md

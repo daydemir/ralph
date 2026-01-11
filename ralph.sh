@@ -44,7 +44,7 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
   echo ""
 
   # Run Claude and process output
-  "$CLAUDE_CMD" -p "$(cat PROMPT.md)" \
+  "$CLAUDE_CMD" --model sonnet -p "$(cat PROMPT.md)" \
     --allowedTools "Read,Write,Edit,Bash,Glob,Grep,Task,TodoWrite,WebFetch,WebSearch" \
     --output-format stream-json --verbose \
     prd.json progress.txt fix_plan.md CODEBASE-MAP.md \
