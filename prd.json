@@ -1,17 +1,16 @@
 {
   "features": [
     {
-      "id": "example-feature",
-      "description": "Example PRD - delete this and add your own",
+      "id": "add-readme",
+      "description": "Create a comprehensive README for the project",
       "steps": [
-        "Step 1: Research existing code to understand current state",
-        "Step 2: Write failing tests that define expected behavior",
-        "Step 3: Implement the feature following code standards",
-        "Step 4: Run verification (build + tests)",
-        "Step 5: Update prd.json to set passes=true"
+        "Analyze project structure and dependencies",
+        "Document setup and installation instructions",
+        "Add usage examples",
+        "Include contribution guidelines"
       ],
       "passes": false,
-      "notes": "Delete this example and add your real PRDs"
+      "notes": "Starter PRD - replace with your own after testing"
     }
   ]
 }

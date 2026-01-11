@@ -18,17 +18,24 @@ Ralph picks a PRD, writes tests, implements the feature, verifies it works, mark
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
 - `jq` for JSON processing: `brew install jq`
 
+Verify Claude Code is working:
+```bash
+claude --version
+```
+
 ## Setup
 
 1. **Use this template** to create your own repo (click "Use this template" on GitHub)
 
-2. **Clone next to your project repos:**
+2. **Clone next to your project repos** (not inside them):
    ```
-   ~/projects/
-   ├── ralph/          # This repo (your PRD workspace)
-   ├── my-app/         # Your application repo
-   └── my-backend/     # Your backend repo (if any)
+   ~/projects/              # Your workspace folder
+   ├── ralph/               # This repo - sits NEXT TO your code repos
+   ├── my-app/              # Your application repo
+   └── my-backend/          # Your backend repo (if any)
    ```
+
+   > **Important:** Ralph works by looking at sibling directories. It should be at the same level as your code repos, not inside them.
 
 3. **Fill in `CODEBASE-MAP.md`** with your repo structure and tech stack
 
@@ -41,6 +48,71 @@ Ralph picks a PRD, writes tests, implements the feature, verifies it works, mark
    ./ralph.sh        # Run until all PRDs complete (max 10 iterations)
    ./ralph.sh 5      # Run max 5 iterations
    ```
+
+## Quick Start: Your First Feature
+
+After setup, try this simple first PRD to see Ralph in action:
+
+1. **Edit `CODEBASE-MAP.md`** - fill in your repo path and tech stack:
+   ```markdown
+   ## Repositories
+   - `../my-app/` - Main application (Node.js, npm)
+
+   ## Build & Test
+   - Build: `cd ../my-app && npm run build`
+   - Test: `cd ../my-app && npm test`
+   ```
+
+2. **Edit `prd.json`** - the template includes a starter PRD:
+   ```json
+   {
+     "features": [
+       {
+         "id": "add-readme",
+         "description": "Create a comprehensive README for the project",
+         "steps": [
+           "Analyze project structure and dependencies",
+           "Document setup and installation instructions",
+           "Add usage examples",
+           "Include contribution guidelines"
+         ],
+         "passes": false
+       }
+     ]
+   }
+   ```
+
+3. **Run Ralph:**
+   ```bash
+   ./ralph.sh 1    # Run 1 iteration to test
+   ```
+
+4. **Watch the output** - you'll see Ralph working through the PRD
+
+## What to Expect
+
+When Ralph runs, you'll see output like this:
+
+```
+=== Ralph iteration 1 of 10 (started 14:32:15) ===
+
+PRDs (1 remaining):
+  ○ add-readme
+
+>>> WORKING ON: add-readme <<<
+
+[14:32:18] I'll analyze the project structure first...
+[14:32:25] [Tools: 3] The project uses Node.js with Express...
+[14:32:40] [Tools: 5] Creating the README with setup instructions...
+[14:33:02] [Done] Completed add-readme, marking as passes=true...
+
+=== Ralph complete after 1 iterations ===
+```
+
+- `>>> WORKING ON: <id> <<<` shows which PRD Ralph selected
+- `[HH:MM:SS]` timestamps track progress
+- `[Tools: N]` shows tool calls between text outputs
+- `[Done]` indicates completion
 
 ## Adding PRDs
 
