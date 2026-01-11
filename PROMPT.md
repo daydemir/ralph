@@ -2,11 +2,11 @@ You are working through a product backlog autonomously.
 
 ## 0. Study Context (every iteration)
 
-0a. Study specs/* to learn about feature specifications
-0b. Study prd.json for feature requirements
-0c. Study fix_plan.md for known issues
-0d. Study progress.txt for your memory of prior work
-0e. Study CODEBASE-MAP.md to understand repos and tech stack
+0a. Read prd.json to identify the PRD you'll work on
+0b. Load only specs/* files mentioned in PRD steps (not all specs)
+0c. Read fix_plan.md for known issues
+0d. Read progress.txt (last 50 lines if large) for prior work
+0e. Read CODEBASE-MAP.md to understand repos and tech stack
 
 ## 1. Select ONE Feature
 
@@ -94,6 +94,10 @@ npm test
 - Update prd.json to set `passes: true` for completed feature
 - Append progress to progress.txt (what you did, learnings, bugs noticed)
 - Update fix_plan.md with any bugs found or items to address
+
+**Progress file management:**
+- If progress.txt exceeds 200 lines, summarize older entries before appending
+- Keep last 50 lines verbatim, summarize the rest into a "## History Summary" section
 
 ## 6. Commit & Deploy
 

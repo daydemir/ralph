@@ -26,6 +26,10 @@ Ralph is a system for autonomous code development using Claude Code. The workflo
 
 Ralph picks a PRD, writes tests, implements the feature, verifies it works, marks it complete, and moves to the next one.
 
+## Requirements
+
+> **Important:** Ralph is designed for autonomous multi-iteration work and can consume significant Claude Code usage. The **Claude Code Max plan** (20x usage quota) is strongly recommended. Standard plans may hit rate limits quickly.
+
 ## Prerequisites
 
 - [Claude Code CLI](https://claude.ai/code) installed and authenticated
