@@ -65,6 +65,24 @@ You are working through a product backlog autonomously.
 - Generic `Error` / `Exception` - create typed error types
 - String-based dictionary keys - use typed keys
 
+**Prefer Enums for Constrained Choices:**
+
+Enums are powerful for type safety. Use them liberally:
+- Any time there's a discrete set of choices (not open-ended strings)
+- State machines and status tracking
+- Configuration options and flags
+- Error types (instead of generic Error)
+- API response variants (discriminated unions)
+
+Enum patterns to embrace:
+- **Associated values** for state-specific data: `case loaded(result: T)`
+- **Computed properties** for derived behavior
+- **Methods** on enums for encapsulated logic
+- **CaseIterable** when you need to iterate all cases
+- **Raw values** (`String`, `Int`) for serialization
+
+Replace strings, ints, and booleans with enums whenever the domain has a finite set of valid values.
+
 ### Functional Programming
 
 - Pure functions without side effects where possible
