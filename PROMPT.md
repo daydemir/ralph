@@ -162,50 +162,39 @@ When a PRD requires changes to multiple repos:
    - Each commit should reference the same PRD id
 4. **Mark PRD passes=true only when ALL repos are committed and deployed**
 
-## Human PRDs (Tasks for User)
+## Human PRDs (Reference Only)
 
-When you encounter tasks that **cannot be completed via CLI**, create a human PRD in `prd-human.json` instead of blocking.
+Human PRDs (`prd-human.json`) track tasks requiring manual user action (console UIs, hardware testing, credentials).
 
-### When to Create Human PRDs
+### Ralph's Role
 
-Create a human PRD when the task requires:
-- **Console/web UI actions**: Cloud consoles, dashboards, admin panels
-- **Hardware testing**: Camera, GPS, sensors, device-specific features
-- **Account credentials**: Creating API keys, OAuth setup, signing certificates
-- **Physical presence**: Location-based testing, device-specific testing
-- **Manual verification**: Visual UI review, user experience testing
+- **Read-only check**: Glance at prd-human.json to understand pending human tasks
+- **Never assume blocked**: Do NOT assume an incomplete human task blocks your PRD unless 100% certain
+- **Never process**: Ralph does not complete or mark human PRDs as done - that's the user's job
+- **Can add**: Ralph can create new human PRDs or add info to existing ones (rare)
+- **Attempt first**: Always try to accomplish tasks via CLI before creating a human PRD
 
-### Human PRD Schema
+### When to Create (rare)
+
+Only create when task **definitively** requires:
+- Physical device testing (camera, GPS hardware, AR on device)
+- Web console UI with no CLI equivalent
+- Manual credential entry (passwords, signing certificates)
+
+### Schema (if needed)
 
 ```json
 {
   "id": "kebab-case-id",
   "description": "What the user needs to do",
-  "steps": ["Step 1", "Step 2", "..."],
-  "references": ["https://relevant-docs.example.com"],
-  "estimated_time_minutes": 15,
-  "prerequisites": ["What user needs before starting"],
+  "steps": ["Step 1", "Step 2"],
+  "references": ["https://docs.example.com"],
   "completed": false,
   "created_by_prd": "source-prd-id"
 }
 ```
 
-### Requirements
-
-1. **Research first**: Before creating a human PRD, search online for official documentation
-2. **Include reference URLs**: Every human PRD must have at least one reference link
-3. **Clear steps**: Steps should be clear enough for a non-technical user
-4. **Estimate time**: Provide realistic time estimate
-5. **List prerequisites**: What the user needs (accounts, devices, permissions)
-
-### Notification
-
-When you create a human PRD, output on its own line:
-```
-HUMAN_PRD_CREATED: <task-id>
-```
-
-This signals to the user that manual action is needed before proceeding.
+When you create one, output: `HUMAN_PRD_CREATED: <task-id>`
 
 ## Context Optimization
 
