@@ -1,0 +1,17 @@
+{
+  "features": [
+    {
+      "id": "example-feature",
+      "description": "Example PRD - delete this and add your own",
+      "steps": [
+        "Step 1: Research existing code to understand current state",
+        "Step 2: Write failing tests that define expected behavior",
+        "Step 3: Implement the feature following code standards",
+        "Step 4: Run verification (build + tests)",
+        "Step 5: Update prd.json to set passes=true"
+      ],
+      "passes": false,
+      "notes": "Delete this example and add your real PRDs"
+    }
+  ]
+}
