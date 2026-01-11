@@ -13,6 +13,10 @@ You are working through a product backlog autonomously.
 - Find a feature where `passes: false` (choose based on logical dependencies)
 - Implement ONLY that single feature per iteration
 - Before making changes, search codebase first (don't assume not implemented)
+- **When you select a PRD, output on its own line:**
+  ```
+  SELECTED_PRD: <feature-id>
+  ```
 
 ## 2. Write Tests First (TDD)
 

@@ -52,20 +52,35 @@ for ((i=1; i<=MAX_ITERATIONS; i++)); do
       if .type == "assistant" then
         .message.content[]? |
         if .type == "tool_use" then "TOOL"
-        elif .type == "text" then "TEXT:" + (.text | gsub("\n"; " ") | .[0:120])
+        elif .type == "text" then
+          # Check for SELECTED_PRD pattern
+          if (.text | test("SELECTED_PRD:")) then
+            "PRD:" + (.text | capture("SELECTED_PRD:\\s*(?<id>[a-zA-Z0-9_-]+)") | .id // "unknown")
+          else
+            "TEXT:" + (.text | gsub("\n"; " ") | .[0:400])
+          end
         else empty end
       elif .type == "result" then
-        "DONE:" + (.result | gsub("\n"; " ") | .[0:80])
+        "DONE:" + (.result | gsub("\n"; " ") | .[0:200])
       else empty end
     ' 2>/dev/null | awk '
 BEGIN { tools = 0 }
 /^TOOL$/ { tools++; next }
+/^PRD:/ {
+  prd = substr($0, 5)
+  printf "\n>>> WORKING ON: %s <<<\n\n", prd
+  next
+}
 /^TEXT:/ {
   text = substr($0, 6)
-  if (tools > 0) { printf "[Tools: %d] %s\n", tools, text; tools = 0 }
-  else { print text }
+  timestamp = strftime("[%H:%M:%S]")
+  if (tools > 0) { printf "%s [Tools: %d] %s\n", timestamp, tools, text; tools = 0 }
+  else { printf "%s %s\n", timestamp, text }
 }
-/^DONE:/ { print "[Done] " substr($0, 6) "..." }
+/^DONE:/ {
+  timestamp = strftime("[%H:%M:%S]")
+  printf "%s [Done] %s...\n", timestamp, substr($0, 6)
+}
 END { if (tools > 0) printf "[Final tools: %d]\n", tools }
 '
 
