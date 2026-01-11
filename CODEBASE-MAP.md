@@ -51,6 +51,17 @@ cd ../my-app && npm run lint
 - `src/models/` - Data models
 - `tests/` - Test files
 
+## Deploy Configuration
+
+<!-- Tell Ralph which repos should auto-deploy after commit -->
+<!-- Set auto-deploy to "yes" for repos that deploy immediately -->
+<!-- Set to "no" for repos that need manual release (like iOS apps) -->
+
+| Repo | Auto-Deploy | Deploy Command | Notes |
+|------|-------------|----------------|-------|
+| my-app | no | Manual release | Requires review |
+| my-backend | yes | `cd ../my-backend && npm run deploy` | Deploys to prod |
+
 ## Notes
 
 <!-- Any special instructions for Ralph -->

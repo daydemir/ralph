@@ -10,7 +10,10 @@ You are working through a product backlog autonomously.
 
 ## 1. Select ONE Feature
 
-- Find a feature where `passes: false` (choose based on logical dependencies)
+- Find a feature where `passes: false`
+- Check `may_depend_on` field if present - consider doing those first
+  - But use judgment: dependencies might already be satisfied, or only partially needed
+  - The list may be incomplete; analyze the steps to find unlisted dependencies
 - Implement ONLY that single feature per iteration
 - Before making changes, search codebase first (don't assume not implemented)
 - **When you select a PRD, output on its own line:**
@@ -92,13 +95,22 @@ npm test
 - Append progress to progress.txt (what you did, learnings, bugs noticed)
 - Update fix_plan.md with any bugs found or items to address
 
-## 6. Commit
+## 6. Commit & Deploy
 
-- `git add -A && git commit` with descriptive message
-- If all features pass, output ALL THREE completion signals:
-  - RALPH_COMPLETE
-  - `<promise>RALPH_COMPLETE</promise>`
-  - `{"notify": true, "message": "Ralph: [20-word summary of work done]"}`
+**For EACH repository where you made changes:**
+- `cd <repo-path>` (paths defined in CODEBASE-MAP.md)
+- `git add -A && git commit` with descriptive message referencing PRD id
+- Example: `feat(tour-tracking): add visit recording endpoint`
+
+**Deploy (if configured in CODEBASE-MAP.md):**
+- Check CODEBASE-MAP.md for deploy commands per repo
+- **ALWAYS commit before deploying** - never deploy uncommitted code
+- Log deployments in progress.txt with timestamp
+
+**Completion signals (only if ALL features pass):**
+- RALPH_COMPLETE
+- `<promise>RALPH_COMPLETE</promise>`
+- `{"notify": true, "message": "Ralph: [20-word summary of work done]"}`
 
 ## Available Tools
 
@@ -118,11 +130,11 @@ When a PRD requires changes to multiple repos:
    - If adding new API endpoint: Backend first, then client
    - If client needs different endpoint behavior: Check backend compatibility first
    - If adding new data model: Sync schema between backend and client
-3. **Implement in phases:**
-   - Phase A: Backend changes
-   - Phase B: Client changes
-   - Verify each phase independently
-4. **Mark PRD passes=true only when ALL sides are complete and tested**
+3. **Implement in phases with commits:**
+   - Phase A: Backend changes → **commit in backend repo** → deploy if configured
+   - Phase B: Client changes → **commit in client repo**
+   - Each commit should reference the same PRD id
+4. **Mark PRD passes=true only when ALL repos are committed and deployed**
 
 ## Important
 

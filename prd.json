@@ -10,7 +10,8 @@
         "Include contribution guidelines"
       ],
       "passes": false,
-      "notes": "Starter PRD - replace with your own after testing"
+      "may_depend_on": [],
+      "notes": "Starter PRD - replace with your own after testing. may_depend_on is optional and may be incomplete - use judgment."
     }
   ]
 }
