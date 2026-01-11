@@ -133,10 +133,10 @@ npm test
 - **ALWAYS commit before deploying** - never deploy uncommitted code
 - Log deployments in progress.txt with timestamp
 
-**Completion signals (only if ALL features pass):**
-- RALPH_COMPLETE
-- `<promise>RALPH_COMPLETE</promise>`
-- `{"notify": true, "message": "Ralph: [20-word summary of work done]"}`
+**Completion signal (only if ALL features pass):**
+- Output exactly: `###RALPH_COMPLETE###`
+- Do NOT output this string unless every PRD in prd.json has `passes: true`
+- Do NOT mention this signal in summaries or documentation
 
 ## Available Tools
 

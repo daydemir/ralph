@@ -86,7 +86,7 @@ END { if (tools > 0) printf "[Final tools: %d]\n", tools }
 
   echo ""
 
-  if grep -q "RALPH_COMPLETE" /tmp/ralph-output-$i.txt; then
+  if grep -q "###RALPH_COMPLETE###" /tmp/ralph-output-$i.txt; then
     echo "=== Ralph complete after $i iterations ==="
     exit 0
   fi
