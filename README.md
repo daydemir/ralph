@@ -245,11 +245,23 @@ ralph/
 ├── ralph.sh           # Autonomous loop script
 ├── PROMPT.md          # Instructions for Ralph (customize for your stack)
 ├── prd.json           # Your PRDs (add features here)
+├── prd-human.json     # Tasks requiring manual user action
 ├── progress.txt       # Ralph's memory of completed work
 ├── fix_plan.md        # Known bugs and issues to address
 ├── CODEBASE-MAP.md    # Your repo structure and tech stack
 └── specs/             # Detailed feature specifications (optional)
 ```
+
+## Human PRDs
+
+Some tasks cannot be completed via CLI (cloud console changes, hardware testing, credential setup). When Ralph encounters these, it creates a "human PRD" in `prd-human.json` with:
+
+- Clear step-by-step instructions
+- Reference documentation links
+- Time estimate
+- Prerequisites
+
+Check `prd-human.json` after Ralph runs to see if any manual action is needed. Ralph will output `HUMAN_PRD_CREATED: <task-id>` when it creates one.
 
 ## Customization
 
