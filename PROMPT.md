@@ -10,10 +10,14 @@ You are working through a product backlog autonomously.
 
 ## 1. Select ONE Feature
 
-- Find a feature where `passes: false`
-- Check `may_depend_on` field if present - consider doing those first
-  - But use judgment: dependencies might already be satisfied, or only partially needed
-  - The list may be incomplete; analyze the steps to find unlisted dependencies
+- Find features where `passes: false`
+- **Make a product decision** about which to work on:
+  - What has highest business/user value?
+  - What unblocks the most other work?
+  - What's appropriate for remaining context?
+- Check `may_depend_on` - dependencies may need to be done first
+  - But use judgment: dependencies might already be satisfied
+- **Do NOT just pick the first one** - choose based on priority
 - Implement ONLY that single feature per iteration
 - Before making changes, search codebase first (don't assume not implemented)
 - **When you select a PRD, output on its own line:**
