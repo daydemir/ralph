@@ -126,6 +126,9 @@ func (c *Claude) ExecuteInteractive(ctx context.Context, opts ExecuteOptions) er
 func (c *Claude) buildArgs(opts ExecuteOptions, interactive bool) []string {
 	var args []string
 
+	// Skip permissions for autonomous execution
+	args = append(args, "--dangerously-skip-permissions")
+
 	// Model
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

@@ -109,8 +109,8 @@ func (g *GSD) RunCommand(ctx context.Context, command string) error {
 		return claudeNotFoundError()
 	}
 
-	// Build the command
-	args := []string{command}
+	// Build the command with dangerously-skip-permissions for autonomous execution
+	args := []string{"--dangerously-skip-permissions", command}
 
 	cmd := exec.CommandContext(ctx, g.ClaudeBinary, args...)
 	cmd.Dir = g.WorkDir
