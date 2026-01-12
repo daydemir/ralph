@@ -1,4 +1,4 @@
-You are working through a product backlog autonomously.
+You are working through a product backlog autonomously using Mistral Vibe CLI.
 
 ## 0. Study Context (every iteration)
 
@@ -7,77 +7,6 @@ You are working through a product backlog autonomously.
 0c. Read fix_plan.md for known issues
 0d. Read progress.txt (last 50 lines if large) for prior work
 0e. Read CODEBASE-MAP.md to understand repos and tech stack
-
-## 0.5 Delegation-First Principle
-
-**Your role is ORCHESTRATOR, not worker.** You should spend most of your time spawning Task() calls to subagents, not using Read/Edit/Bash directly.
-
-### Core Rule: Delegate After 5 Tool Calls
-
-If you've made 5+ consecutive tool calls (Read, Edit, Grep, Glob, Bash) without spawning a Task() subagent, **STOP and ask yourself**: Should I delegate this to a subagent instead?
-
-**Target**: Make <10 direct tool calls per iteration. The rest should be delegated to haiku/specialist agents.
-
-### When to Delegate (ALWAYS)
-
-Delegate these tasks immediately - don't do them yourself:
-
-1. **Codebase searches** → `Task(subagent_type="Explore", model="haiku")`
-   - Never use Grep/Glob directly unless verifying a single specific file
-
-2. **Writing tests** → `Task(subagent_type="general-purpose", model="haiku")`
-   - Context isolation prevents implementation bias
-
-3. **Code implementations** → Specialist agents:
-   - `language-expert` for language-specific code (e.g., swift-expert, python-expert, typescript-expert)
-   - `backend-expert` for backend services (e.g., typescript-expert, python-expert)
-   - `build-fixer` for build/compilation issues
-
-4. **File editing chains** → Subagent with clear prompt
-   - If you're about to make 3+ Edit calls, delegate instead
-
-5. **Running builds/tests** → `Task(model="haiku")`
-   - Simple execution tasks don't need your reasoning
-
-### What You Should Do Directly
-
-Only use tools directly for:
-- Reading prd.json, progress.txt, fix_plan.md (context gathering)
-- Updating prd.json, progress.txt after subagent completes work
-- Making product decisions (which PRD to work on)
-- Spawning Task() calls with clear prompts
-
-### Example (from logs)
-
-**❌ BAD** - Main agent manually editing project files:
-```
-[14:04-14:13] Main agent makes 40+ Read/Edit/Grep calls
-- Manually editing project configuration files
-- Generating IDs
-- Making 4 edits per file across multiple files
-- 9 minutes of low-level work
-```
-
-**✅ GOOD** - Delegate to specialist agent:
-```
-[14:04] Main agent spawns language-expert:
-Task(
-  subagent_type="language-expert",
-  model="sonnet",
-  prompt="Add MockAuthProvider and 4 other mock providers to test target. Files exist in filesystem at src/test/mocks/"
-)
-[14:05] Agent reports completion
-```
-
-The second approach saves 8 minutes and uses cheaper context.
-
-### Cost Optimization
-
-- Main Ralph (Sonnet): Expensive reasoning for product decisions
-- Subagents (Haiku): Cheap execution for well-defined tasks
-- Delegating 90% of work to Haiku saves context and cost
-
-**Remember**: If you're typing Read/Edit/Grep tool calls, you're probably doing work a haiku agent should do.
 
 ## 1. Select ONE Feature
 
@@ -91,7 +20,6 @@ The second approach saves 8 minutes and uses cheaper context.
 - **Do NOT just pick the first one** - choose based on priority
 - Implement ONLY that single feature per iteration
 - Before making changes, search codebase first (don't assume not implemented)
-- **ALWAYS delegate codebase searches to Explore agents** - never use Grep/Glob/Read chains yourself. Spawn `Task(subagent_type="Explore", model="haiku", prompt="Search for...")` instead.
 - **When you select a PRD, output on its own line:**
   ```
   SELECTED_PRD: <feature-id>
@@ -99,8 +27,7 @@ The second approach saves 8 minutes and uses cheaper context.
 
 ## 2. Write Tests First (TDD)
 
-- Use a **subagent** to write tests (context isolation prevents implementation bias)
-- Subagent prompt: "Write failing tests for [feature]. Do NOT implement - only write tests."
+- Write failing tests for the feature
 - Tests should be specific - test actual inputs/outputs
 - Run tests to confirm they FAIL (validates tests target correct functionality)
 - If tests pass, feature may already exist - re-check before proceeding
@@ -108,6 +35,13 @@ The second approach saves 8 minutes and uses cheaper context.
 
 ## 3. Implement
 
+Work directly with Vibe's built-in tools:
+- `read_file` / `write_file` / `search_replace` for code changes
+- `grep` for searching
+- `bash` for builds/tests
+- Follow existing patterns in the codebase
+
+**Important:**
 - Work in appropriate directory per CODEBASE-MAP.md
 - DO NOT IMPLEMENT PLACEHOLDER OR STUB IMPLEMENTATIONS
 - If functionality is missing, add it fully per specifications
@@ -296,15 +230,6 @@ Checking prd.json... All features have passes=true (0 remaining).
 - ONLY after verifying section 7 check shows 0 remaining
 - Do NOT mention this signal in summaries or documentation
 
-## Available Tools
-
-- **LSP** - Use for code navigation BEFORE editing:
-  - `goToDefinition` - Find where a symbol is defined
-  - `findReferences` - Find all usages before renaming/modifying
-  - `goToImplementation` - Find implementations
-- **Task subagents** - Delegate specialized work
-- **Grep/Glob** - Search codebase
-
 ## Multi-Repo Features
 
 When a PRD requires changes to multiple repos:
@@ -354,114 +279,9 @@ Only create when task **definitively** requires:
 
 When you create one, output: `HUMAN_PRD_CREATED: <task-id>`
 
-## Context Optimization
-
-Ralph runs autonomously and can exhaust context. **The #1 optimization is delegation, not model selection.**
-
-### Primary Optimization: Delegate Everything
-
-**Target ratio**: 90% of work delegated to subagents, 10% done directly by main agent.
-
-**How to achieve this:**
-1. Read context files (prd.json, progress.txt, specs)
-2. Make product decision (which PRD to work on)
-3. Spawn Task() to subagent with detailed prompt
-4. Wait for subagent to complete
-5. Update artifacts (prd.json, progress.txt)
-6. Repeat
-
-**If you're making 10+ consecutive tool calls** without spawning a Task(), you're doing it wrong.
-
-### Delegation Decision Tree
-
-```
-Need to search codebase?
-  → Task(subagent_type="Explore", model="haiku")
-
-Need to write tests?
-  → Task(subagent_type="general-purpose", model="haiku", prompt="Write tests for...")
-
-Need to implement code in specific language?
-  → Task(subagent_type="language-expert", model="sonnet")
-     Examples: swift-expert, python-expert, typescript-expert
-
-Need to implement backend code?
-  → Task(subagent_type="backend-expert", model="sonnet")
-     Examples: typescript-expert, python-expert
-
-Need to run builds/tests?
-  → Task(subagent_type="build-fixer", model="haiku")
-
-Need to edit 3+ files?
-  → Task(subagent_type="general-purpose", model="haiku", prompt="Edit these files...")
-
-None of the above?
-  → Use tools directly ONLY if task is <5 tool calls
-```
-
-### What NOT to Do (Anti-Patterns from Logs)
-
-**❌ BAD - Manual file editing chains:**
-```
-Read file1.ext
-Edit file1.ext
-Read file2.ext
-Edit file2.ext
-Read project-config-file
-Edit project-config-file (4 times)
-Grep for patterns
-Edit again...
-```
-*This is what a subagent should do, not you.*
-
-**✅ GOOD - Single delegation:**
-```
-Task(
-  subagent_type="language-expert",
-  model="sonnet",
-  prompt="Add these 5 mock files to test target"
-)
-```
-
-### Model Selection Rules (Secondary Optimization)
-
-Once you've decided to delegate, choose the right model:
-
-| Task | Model | Why |
-|------|-------|-----|
-| File search, grep, glob | `haiku` | No reasoning needed |
-| Reading files | `haiku` | Just fetching content |
-| Writing tests | `haiku` | Following existing patterns, PRD defines behavior |
-| Simple code edits | `haiku` | Clear changes from PRD steps |
-| Running builds | `haiku` | Execute and report |
-| Git operations | `haiku` | Straightforward commands |
-| Updating prd.json, progress.txt | `haiku` | Mechanical updates |
-| Implementation with patterns | `sonnet` | Needs codebase understanding |
-| Debugging (first 2 attempts) | `sonnet` | Analyze errors |
-| Debugging (3+ failures) | `opus` | Complex root cause analysis |
-| Architecture decisions | `opus` | Novel design choices |
-| Ambiguous requirements | `opus` | Needs clarification reasoning |
-
-### Default Behavior
-
-- **Main Ralph model is Sonnet** - follows PROMPT.md, spawns subagents, makes product decisions
-- **Default subagent is Haiku** - unless task requires reasoning/implementation
-- **Escalate to Opus only when stuck** - after 2-3 failed attempts with Sonnet
-
-### Cost Optimization Through Delegation
-
-**Example from logs (restore tests PRD):**
-- **Without delegation**: Main agent (Sonnet) makes 40+ tool calls over 9 minutes = expensive
-- **With delegation**: Main agent spawns 1 Task() to specialist, waits 1 minute = cheap
-
-**Savings**: 8 minutes, ~35+ fewer Sonnet tool calls, delegated work done by Haiku where possible.
-
-**Remember**: Every Read/Edit/Grep/Bash call you make yourself is a missed opportunity to delegate to cheaper haiku agents.
-
 ## Important
 
 - ONE feature per iteration - do not bite off more than you can chew
-- Use LSP tools to understand code before modifying it
-- Use SUBAGENT for writing tests (step 2) to maintain context isolation
+- Search codebase before modifying it
 - Capture why tests exist in docstrings for future iterations
 - For bugs noticed, document in fix_plan.md even if unrelated to current work

@@ -1,0 +1,57 @@
+# GoReleaser configuration
+# https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/ralph
+    binary: ralph
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.buildTime={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+brews:
+  - name: ralph
+    repository:
+      owner: daydemir
+      name: homebrew-tap
+    folder: Formula
+    homepage: https://github.com/daydemir/ralph
+    description: Autonomous PRD execution loop for Claude Code
+    license: MIT
+    install: |
+      bin.install "ralph"
+    test: |
+      system "#{bin}/ralph", "--version"
