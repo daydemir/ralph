@@ -47,7 +47,7 @@ brews:
     repository:
       owner: daydemir
       name: homebrew-tap
-    folder: Formula
+    directory: Formula
     homepage: https://github.com/daydemir/ralph
     description: Autonomous PRD execution loop for Claude Code
     license: MIT
