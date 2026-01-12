@@ -77,6 +77,17 @@ func (g *GSD) HasState() bool {
 	return err == nil
 }
 
+// HasCodebaseMaps checks if codebase analysis exists
+func (g *GSD) HasCodebaseMaps() bool {
+	codebaseDir := filepath.Join(g.PlanningDir(), "codebase")
+	if _, err := os.Stat(codebaseDir); os.IsNotExist(err) {
+		return false
+	}
+	// Check for at least one map file
+	files, _ := os.ReadDir(codebaseDir)
+	return len(files) > 0
+}
+
 // RequireProject returns an error if PROJECT.md doesn't exist
 func (g *GSD) RequireProject() error {
 	if !g.HasProject() {
