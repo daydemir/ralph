@@ -3,88 +3,49 @@ package cli
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"os"
+	"strconv"
 
-	"github.com/daydemir/ralph/internal/config"
-	"github.com/daydemir/ralph/internal/llm"
-	"github.com/daydemir/ralph/internal/prompts"
-	"github.com/daydemir/ralph/internal/workspace"
+	"github.com/daydemir/ralph/internal/planner"
 	"github.com/spf13/cobra"
 )
 
-var (
-	planLLM string
-	planCmd = &cobra.Command{
-		Use:   "plan",
-		Short: "Interactive planning mode for creating PRDs",
-		Long: `Start an interactive planning session with Claude.
+var planCmd = &cobra.Command{
+	Use:   "plan [phase-number]",
+	Short: "Create executable plans for a phase",
+	Long: `Create executable PLAN.md files for a phase.
 
-In planning mode, you can:
-  - Discuss what features to build
-  - Have Claude research your codebase
-  - Create well-defined PRDs
-  - Add PRDs to the backlog
+Requires: ROADMAP.md (run 'ralph roadmap' first)
 
-This opens an interactive Claude Code session.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			wsDir, err := workspace.Find()
-			if err != nil {
-				return err
-			}
+This opens Claude to create plans with:
+  - 2-3 atomic tasks per plan (sized for one Claude session)
+  - Verification commands for each task
+  - Overall verification checks
 
-			cfg, err := config.Load(wsDir)
-			if err != nil {
-				return fmt.Errorf("failed to load config: %w", err)
-			}
+Creates:
+  .planning/phases/{phase}/
+  ├── {phase}-01-PLAN.md    First plan
+  ├── {phase}-02-PLAN.md    Second plan (if needed)
+  └── ...
 
-			return runPlan(wsDir, cfg, planLLM)
-		},
-	}
-)
+After planning, run 'ralph run' to execute the plans.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		phase, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid phase number: %s", args[0])
+		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+
+		gsd := planner.NewGSD("", cwd)
+		return gsd.PlanPhase(context.Background(), phase)
+	},
+}
 
 func init() {
 	rootCmd.AddCommand(planCmd)
-	planCmd.Flags().StringVar(&planLLM, "llm", "claude", "LLM backend to use (claude, mistral)")
-}
-
-func runPlan(wsDir string, cfg *config.Config, llmBackend string) error {
-	// Load the plan prompt
-	prompt, err := prompts.GetForWorkspace(wsDir, "plan")
-	if err != nil {
-		return fmt.Errorf("failed to load plan prompt: %w", err)
-	}
-
-	// Set up context files
-	ralphDir := filepath.Join(wsDir, ".ralph")
-	contextFiles := []string{
-		filepath.Join(ralphDir, "prd.json"),
-		filepath.Join(ralphDir, "codebase-map.md"),
-		filepath.Join(ralphDir, "progress.txt"),
-	}
-
-	// Create backend based on flag
-	var backend llm.Backend
-	switch llmBackend {
-	case "mistral":
-		backend = llm.NewKiloCode(cfg.Mistral.Binary, cfg.Mistral.APIKey)
-	case "claude":
-		fallthrough
-	default:
-		backend = llm.NewClaude(cfg.Claude.Binary)
-	}
-
-	fmt.Println("Starting planning mode...")
-	fmt.Println("Use this session to discuss features and create PRDs.")
-	fmt.Println()
-
-	// Execute interactively
-	opts := llm.ExecuteOptions{
-		Prompt:       prompt,
-		ContextFiles: contextFiles,
-		Model:        cfg.LLM.Model,
-		AllowedTools: cfg.Claude.AllowedTools,
-		WorkDir:      wsDir,
-	}
-
-	return backend.ExecuteInteractive(context.Background(), opts)
 }

@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+// ExecuteOptions contains options for Claude execution
+type ExecuteOptions struct {
+	Prompt       string
+	ContextFiles []string
+	Model        string
+	AllowedTools []string
+	WorkDir      string
+}
+
 // Claude implements the Backend interface for Claude Code CLI
 type Claude struct {
 	BinaryPath string

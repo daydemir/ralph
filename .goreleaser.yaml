@@ -49,7 +49,7 @@ brews:
       name: homebrew-tap
     directory: Formula
     homepage: https://github.com/daydemir/ralph
-    description: Autonomous PRD execution loop for Claude Code
+    description: Autonomous plan execution engine built on GSD planning
     license: MIT
     install: |
       bin.install "ralph"

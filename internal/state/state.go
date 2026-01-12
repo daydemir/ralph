@@ -1,0 +1,217 @@
+package state
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// State represents the current project state parsed from STATE.md
+type State struct {
+	ProjectName    string
+	CurrentPhase   int
+	TotalPhases    int
+	CurrentPlan    int
+	TotalPlans     int
+	Status         string
+	LastActivity   string
+	PlansCompleted int
+	PlansFailed    int
+}
+
+// Phase represents a phase directory
+type Phase struct {
+	Number      int
+	Name        string
+	Path        string
+	Plans       []Plan
+	IsCompleted bool
+}
+
+// Plan represents a PLAN.md file
+type Plan struct {
+	Number      int
+	Name        string
+	Path        string
+	IsCompleted bool // Has corresponding SUMMARY.md
+}
+
+// LoadState reads STATE.md and parses project state
+func LoadState(planningDir string) (*State, error) {
+	statePath := filepath.Join(planningDir, "STATE.md")
+	content, err := os.ReadFile(statePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read STATE.md: %w", err)
+	}
+
+	state := &State{}
+	lines := strings.Split(string(content), "\n")
+
+	// Parse key fields from STATE.md
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Project name from first heading
+		if strings.HasPrefix(line, "# ") && state.ProjectName == "" {
+			state.ProjectName = strings.TrimPrefix(line, "# ")
+			state.ProjectName = strings.TrimSuffix(state.ProjectName, " State")
+		}
+
+		// Phase: X of Y (Phase Name)
+		if strings.HasPrefix(line, "Phase:") {
+			re := regexp.MustCompile(`Phase:\s*(\d+)\s*of\s*(\d+)`)
+			if matches := re.FindStringSubmatch(line); len(matches) >= 3 {
+				state.CurrentPhase, _ = strconv.Atoi(matches[1])
+				state.TotalPhases, _ = strconv.Atoi(matches[2])
+			}
+		}
+
+		// Plan: X of Y
+		if strings.HasPrefix(line, "Plan:") {
+			re := regexp.MustCompile(`Plan:\s*(\d+)\s*of\s*(\d+)`)
+			if matches := re.FindStringSubmatch(line); len(matches) >= 3 {
+				state.CurrentPlan, _ = strconv.Atoi(matches[1])
+				state.TotalPlans, _ = strconv.Atoi(matches[2])
+			}
+		}
+
+		// Status: ...
+		if strings.HasPrefix(line, "Status:") {
+			state.Status = strings.TrimSpace(strings.TrimPrefix(line, "Status:"))
+		}
+
+		// Last activity: ...
+		if strings.HasPrefix(line, "Last activity:") {
+			state.LastActivity = strings.TrimSpace(strings.TrimPrefix(line, "Last activity:"))
+		}
+	}
+
+	return state, nil
+}
+
+// LoadPhases scans .planning/phases/ for phase directories and plans
+func LoadPhases(planningDir string) ([]Phase, error) {
+	phasesDir := filepath.Join(planningDir, "phases")
+	entries, err := os.ReadDir(phasesDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read phases directory: %w", err)
+	}
+
+	var phases []Phase
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		// Parse phase number from directory name (e.g., "01-foundation")
+		name := entry.Name()
+		phase := Phase{
+			Name: name,
+			Path: filepath.Join(phasesDir, name),
+		}
+
+		// Extract phase number
+		re := regexp.MustCompile(`^(\d+)`)
+		if matches := re.FindStringSubmatch(name); len(matches) >= 2 {
+			phase.Number, _ = strconv.Atoi(matches[1])
+		}
+
+		// Load plans within this phase
+		phase.Plans, _ = loadPlans(phase.Path)
+
+		// Phase is completed if all plans are completed
+		phase.IsCompleted = len(phase.Plans) > 0
+		for _, p := range phase.Plans {
+			if !p.IsCompleted {
+				phase.IsCompleted = false
+				break
+			}
+		}
+
+		phases = append(phases, phase)
+	}
+
+	// Sort by phase number
+	sort.Slice(phases, func(i, j int) bool {
+		return phases[i].Number < phases[j].Number
+	})
+
+	return phases, nil
+}
+
+func loadPlans(phaseDir string) ([]Plan, error) {
+	entries, err := os.ReadDir(phaseDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var plans []Plan
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if !strings.HasSuffix(name, "-PLAN.md") {
+			continue
+		}
+
+		plan := Plan{
+			Name: name,
+			Path: filepath.Join(phaseDir, name),
+		}
+
+		// Extract plan number (e.g., "01-02-PLAN.md" -> 2)
+		re := regexp.MustCompile(`-(\d+)-PLAN\.md$`)
+		if matches := re.FindStringSubmatch(name); len(matches) >= 2 {
+			plan.Number, _ = strconv.Atoi(matches[1])
+		}
+
+		// Check if SUMMARY.md exists (plan completed)
+		summaryName := strings.Replace(name, "-PLAN.md", "-SUMMARY.md", 1)
+		summaryPath := filepath.Join(phaseDir, summaryName)
+		if _, err := os.Stat(summaryPath); err == nil {
+			plan.IsCompleted = true
+		}
+
+		plans = append(plans, plan)
+	}
+
+	// Sort by plan number
+	sort.Slice(plans, func(i, j int) bool {
+		return plans[i].Number < plans[j].Number
+	})
+
+	return plans, nil
+}
+
+// FindNextPlan finds the next incomplete plan to execute
+func FindNextPlan(phases []Phase) (*Phase, *Plan) {
+	for i := range phases {
+		phase := &phases[i]
+		for j := range phase.Plans {
+			plan := &phase.Plans[j]
+			if !plan.IsCompleted {
+				return phase, plan
+			}
+		}
+	}
+	return nil, nil
+}
+
+// CountPlans returns total and completed plan counts
+func CountPlans(phases []Phase) (total, completed int) {
+	for _, phase := range phases {
+		for _, plan := range phase.Plans {
+			total++
+			if plan.IsCompleted {
+				completed++
+			}
+		}
+	}
+	return total, completed
+}

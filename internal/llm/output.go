@@ -12,6 +12,18 @@ import (
 	"github.com/fatih/color"
 )
 
+// OutputHandler handles parsed stream events
+type OutputHandler interface {
+	OnToolUse(name string)
+	OnText(text string)
+	OnSelectedPRD(id string)
+	OnDone(result string)
+	OnIterationComplete()
+	OnRalphComplete()
+	IsIterationComplete() bool
+	IsRalphComplete() bool
+}
+
 // StreamEvent represents a single event from Claude's stream-json output
 type StreamEvent struct {
 	Type    string          `json:"type"`

@@ -1,30 +1,35 @@
 package cli
 
 import (
-	"github.com/daydemir/ralph/internal/workspace"
+	"context"
+	"os"
+
+	"github.com/daydemir/ralph/internal/planner"
 	"github.com/spf13/cobra"
 )
 
-var initForce bool
-
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialize a new Ralph workspace",
-	Long: `Initialize a new Ralph workspace in the current directory.
+	Short: "Initialize a new project with GSD planning",
+	Long: `Initialize a new project using Get Shit Done (GSD) planning system.
 
-Creates .ralph/ folder with:
-  - config.yaml      Configuration settings
-  - prd.json         PRD backlog (empty)
-  - prompts/         Customizable prompt templates
-  - codebase-map.md  Project structure documentation
-  - progress.txt     Agent memory/learnings
-  - fix_plan.md      Known issues to address`,
+This opens Claude to ask questions about your project and creates:
+  .planning/
+  ├── PROJECT.md     Project vision, requirements, constraints
+  └── config.json    GSD configuration
+
+After init, run 'ralph roadmap' to create your phase breakdown.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return workspace.Init(initForce)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+
+		gsd := planner.NewGSD("", cwd)
+		return gsd.NewProject(context.Background())
 	},
 }
 
 func init() {
-	initCmd.Flags().BoolVarP(&initForce, "force", "f", false, "overwrite existing workspace")
 	rootCmd.AddCommand(initCmd)
 }

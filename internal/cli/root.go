@@ -8,24 +8,40 @@ import (
 )
 
 var (
-	version = "0.1.0"
+	version = "0.2.0"
 	cfgFile string
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "ralph",
-	Short: "Autonomous PRD execution loop for Claude Code",
-	Long: `Ralph is a CLI tool for autonomous code development using Claude Code.
+	Short: "Autonomous plan execution with GSD planning",
+	Long: `Ralph is an autonomous execution engine built on Get Shit Done (GSD) planning.
 
-Two main modes:
-  plan   - Create and modify PRDs interactively
-  build  - Execute PRDs (single or autonomous loop)
+Planning Commands:
+  init                Initialize a new project
+  roadmap             Create phase breakdown
+  map                 Analyze existing codebase
+  discover [N]        Research a phase
+  discuss [N]         Discuss a phase
+  plan [N]            Create executable plans for a phase
 
-Get started:
-  ralph init              Initialize a new workspace
-  ralph plan              Start planning mode
-  ralph build [prd-id]    Build a specific PRD
-  ralph build --loop      Autonomous execution loop`,
+Execution Commands:
+  run                 Execute the next incomplete plan
+  run --loop [N]      Autonomous loop (up to N plans)
+  status              Show current position
+
+Roadmap Modification:
+  add-phase "desc"         Add phase to end
+  insert-phase N "desc"    Insert as N.1
+  remove-phase N           Remove and renumber
+
+Workflow:
+  1. ralph init              # Create PROJECT.md
+  2. ralph map               # Analyze codebase (brownfield)
+  3. ralph roadmap           # Create ROADMAP.md
+  4. ralph plan 1            # Create plans for Phase 1
+  5. ralph run               # Execute plans
+  6. ralph run --loop 5      # Autonomous execution`,
 	Version: version,
 }
 
@@ -34,7 +50,7 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .ralph/config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .planning/config.json)")
 	rootCmd.SetVersionTemplate(fmt.Sprintf("ralph version %s\n", version))
 }
 
