@@ -35,8 +35,11 @@ type AnalysisResult struct {
 // RunPostAnalysis spawns an agent to analyze discoveries and potentially update subsequent plans
 func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, skipAnalysis bool) *AnalysisResult {
 	result := &AnalysisResult{}
+	yellow := color.New(color.FgYellow).SprintFunc()
 
 	if skipAnalysis {
+		fmt.Printf("[%s] %s Skipped (--skip-analysis flag)\n",
+			time.Now().Format("15:04:05"), yellow("Analysis:"))
 		return result
 	}
 
@@ -51,11 +54,12 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	result.DiscoveriesFound = len(discoveries)
 
 	if len(discoveries) == 0 {
+		fmt.Printf("[%s] %s No discoveries to analyze\n",
+			time.Now().Format("15:04:05"), yellow("Analysis:"))
 		return result
 	}
 
 	cyan := color.New(color.FgCyan).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
 
 	fmt.Printf("[%s] %s Found %d discoveries, running analysis...\n",
 		time.Now().Format("15:04:05"), cyan("Analysis:"), len(discoveries))
@@ -103,6 +107,15 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	// For now, we trust the analysis agent updated what was needed
 	fmt.Printf("[%s] %s Analysis complete\n",
 		time.Now().Format("15:04:05"), cyan("Analysis:"))
+
+	// Check if phase is complete and needs verification plan
+	created, err := e.MaybeCreateVerificationPlan(phase)
+	if err != nil {
+		fmt.Printf("[%s] %s Failed to create verification plan: %v\n",
+			time.Now().Format("15:04:05"), yellow("⚠"), err)
+	} else if created {
+		result.NewPlansCreated++
+	}
 
 	return result
 }
@@ -348,4 +361,203 @@ func FilterBySeverity(discoveries []Discovery, minSeverity string) []Discovery {
 		}
 	}
 	return filtered
+}
+
+// CheckpointVerification represents a checkpoint that needs human verification
+type CheckpointVerification struct {
+	PlanNumber     int
+	PlanName       string
+	PlanPath       string
+	CheckpointName string
+	AutomatedTest  string   // Path to automated test if created
+	WhatAutomated  []string // What aspects were automated
+	NeedsHuman     []string // What still needs human review
+}
+
+// CollectCheckpointDiscoveries scans all completed plans in a phase for checkpoint-automated discoveries
+func (e *Executor) CollectCheckpointDiscoveries(phase *state.Phase) []CheckpointVerification {
+	var verifications []CheckpointVerification
+
+	for _, plan := range phase.Plans {
+		// Only check completed plans (have SUMMARY.md)
+		if !plan.IsCompleted {
+			continue
+		}
+
+		content, err := os.ReadFile(plan.Path)
+		if err != nil {
+			continue
+		}
+
+		discoveries := ParseDiscoveries(string(content))
+		for _, d := range discoveries {
+			if d.Type == "checkpoint-automated" && d.Action == "needs-human-verify" {
+				verification := CheckpointVerification{
+					PlanNumber:     plan.Number,
+					PlanName:       plan.Name,
+					PlanPath:       plan.Path,
+					CheckpointName: d.Title,
+					AutomatedTest:  d.File,
+				}
+
+				// Parse detail for automated/needs-human breakdown
+				lines := strings.Split(d.Detail, "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "Automated aspects:") {
+						verification.WhatAutomated = append(verification.WhatAutomated,
+							strings.TrimSpace(strings.TrimPrefix(line, "Automated aspects:")))
+					} else if strings.HasPrefix(line, "Still needs human review:") {
+						verification.NeedsHuman = append(verification.NeedsHuman,
+							strings.TrimSpace(strings.TrimPrefix(line, "Still needs human review:")))
+					}
+				}
+
+				verifications = append(verifications, verification)
+			}
+		}
+	}
+
+	return verifications
+}
+
+// IsPhaseComplete checks if all regular plans in the phase are completed
+// (excluding decision and verification plans)
+func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
+	for _, plan := range phase.Plans {
+		// Skip special plans (decisions and verification)
+		if plan.Number == 0 || plan.Number >= 99 {
+			continue
+		}
+		if !plan.IsCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+// MaybeCreateVerificationPlan checks if phase is complete and creates bundled verification plan
+func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error) {
+	cyan := color.New(color.FgCyan).SprintFunc()
+
+	// Check if verification plan already exists
+	verificationPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99-verification-PLAN.md", phase.Number))
+	if _, err := os.Stat(verificationPath); err == nil {
+		// Verification plan already exists
+		return false, nil
+	}
+
+	// Check if phase is complete (all regular plans done)
+	if !e.IsPhaseComplete(phase) {
+		return false, nil
+	}
+
+	// Collect all checkpoint discoveries that need human verification
+	verifications := e.CollectCheckpointDiscoveries(phase)
+	if len(verifications) == 0 {
+		// No verifications needed
+		fmt.Printf("[%s] %s Phase complete with no pending verifications\n",
+			time.Now().Format("15:04:05"), cyan("Verification:"))
+		return false, nil
+	}
+
+	fmt.Printf("[%s] %s Found %d checkpoints requiring verification, creating plan...\n",
+		time.Now().Format("15:04:05"), cyan("Verification:"), len(verifications))
+
+	// Create the verification plan
+	err := e.createVerificationPlan(phase, verifications, verificationPath)
+	if err != nil {
+		return false, err
+	}
+
+	fmt.Printf("[%s] %s Created %s\n",
+		time.Now().Format("15:04:05"), cyan("Verification:"), filepath.Base(verificationPath))
+
+	return true, nil
+}
+
+// createVerificationPlan generates the bundled verification plan file
+func (e *Executor) createVerificationPlan(phase *state.Phase, verifications []CheckpointVerification, outPath string) error {
+	var content strings.Builder
+
+	// Write frontmatter
+	content.WriteString(fmt.Sprintf(`---
+phase: %d
+plan: 99
+type: verification
+status: pending
+---
+
+# Phase %d Verification: Human Checkpoint Review
+
+## Objective
+
+Review all automated verifications from this phase and provide feedback.
+This is the final quality gate before the phase is considered complete.
+
+## Checkpoints to Review
+
+`, phase.Number, phase.Number))
+
+	// Write each checkpoint
+	for i, v := range verifications {
+		content.WriteString(fmt.Sprintf(`### %d. %s
+
+**From plan:** %s (Plan %02d-%02d)
+`, i+1, v.CheckpointName, v.PlanName, phase.Number, v.PlanNumber))
+
+		if v.AutomatedTest != "" {
+			content.WriteString(fmt.Sprintf("**Automated test:** `%s`\n", v.AutomatedTest))
+		}
+
+		if len(v.WhatAutomated) > 0 {
+			content.WriteString("**What was automated:**\n")
+			for _, item := range v.WhatAutomated {
+				content.WriteString(fmt.Sprintf("- %s\n", item))
+			}
+		}
+
+		if len(v.NeedsHuman) > 0 {
+			content.WriteString("**Still needs human review:**\n")
+			for _, item := range v.NeedsHuman {
+				content.WriteString(fmt.Sprintf("- %s\n", item))
+			}
+		}
+
+		content.WriteString("\n**How to verify:**\n")
+		content.WriteString("1. Review the automated test results\n")
+		content.WriteString("2. Manually check the aspects that couldn't be automated\n")
+		content.WriteString("3. Provide approval or describe issues\n\n")
+	}
+
+	// Write verification process
+	content.WriteString(`## Verification Process
+
+1. Review each checkpoint above
+2. For each checkpoint, respond:
+   - ✅ **Approved** - Verification passes
+   - ❌ **Issue: [description]** - Describe what's wrong
+
+3. Issues will trigger fix plan creation
+
+<task type="checkpoint:human-action">
+Review all checkpoints above and provide feedback for each.
+<verify>User has reviewed and provided feedback for all checkpoints</verify>
+</task>
+
+## Post-Verification
+
+After all checkpoints are reviewed:
+- **If all approved**: Phase is complete, proceed to next phase
+- **If issues found**: Create fix plans for each issue, then re-verify
+
+## Success Criteria
+
+- All automated tests pass
+- All manual verification aspects reviewed
+- Human approval received for each checkpoint
+- Any issues documented and addressed
+`)
+
+	return os.WriteFile(outPath, []byte(content.String()), 0644)
 }

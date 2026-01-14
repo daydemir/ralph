@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -159,10 +160,33 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		result.FailureType = FailureHard
 		fmt.Printf("[%s] %s %s: %s\n", time.Now().Format("15:04:05"), red("✗"), failure.Type, failure.Detail)
 	} else if handler.IsPlanComplete() {
-		// Success - explicit completion signal
-		result.Success = true
-		result.FailureType = FailureNone
-		fmt.Printf("[%s] %s Plan complete!\n", time.Now().Format("15:04:05"), green("✓"))
+		// Verify SUMMARY.md was created before marking success
+		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+		if _, err := os.Stat(summaryPath); os.IsNotExist(err) {
+			result.Error = fmt.Errorf("plan signaled complete but SUMMARY.md not created: %s", summaryPath)
+			result.FailureType = FailureSoft
+			fmt.Printf("[%s] %s Plan signaled complete but SUMMARY.md missing\n", time.Now().Format("15:04:05"), yellow("⚠"))
+		} else {
+			// Success - explicit completion signal with SUMMARY.md verified
+			result.Success = true
+			result.FailureType = FailureNone
+			fmt.Printf("[%s] %s Plan complete!\n", time.Now().Format("15:04:05"), green("✓"))
+
+			// Update STATE.md and ROADMAP.md with new progress
+			phases, _ := state.LoadPhases(e.config.PlanningDir)
+			if err := state.UpdateStateFile(e.config.PlanningDir, phases); err != nil {
+				fmt.Printf("[%s] %s Failed to update STATE.md: %v\n",
+					time.Now().Format("15:04:05"), yellow("⚠"), err)
+			}
+			if err := state.UpdateRoadmap(e.config.PlanningDir, phases); err != nil {
+				fmt.Printf("[%s] %s Failed to update ROADMAP.md: %v\n",
+					time.Now().Format("15:04:05"), yellow("⚠"), err)
+			}
+
+			// Commit and push all repos
+			planId := fmt.Sprintf("%02d-%02d", phase.Number, plan.Number)
+			e.CommitAndPushRepos(planId)
+		}
 	} else if handler.IsBailout() {
 		// Bailout signal - Claude preserved context, check if Progress was updated
 		bailout := handler.GetBailout()
@@ -212,6 +236,8 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	fmt.Println(bold("=== Ralph Autonomous Loop ==="))
 	fmt.Println()
 
+	var lastPhaseNumber int = -1
+
 	for i := 1; i <= maxIterations; i++ {
 		// Reload phases to get current state
 		phases, err := state.LoadPhases(e.config.PlanningDir)
@@ -224,6 +250,27 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		if plan == nil {
 			fmt.Printf("\n%s All plans complete!\n", green("✓"))
 			return nil
+		}
+
+		// Check if we're starting a new phase - if so, scan for decision checkpoints
+		if phase.Number != lastPhaseNumber {
+			lastPhaseNumber = phase.Number
+			created, err := e.MaybeCreateDecisionsPlan(phase)
+			if err != nil {
+				fmt.Printf("[%s] %s Failed to create decisions plan: %v\n",
+					time.Now().Format("15:04:05"), yellow("⚠"), err)
+			} else if created {
+				// Decisions plan was created - reload phases and find next plan again
+				phases, err = state.LoadPhases(e.config.PlanningDir)
+				if err != nil {
+					return fmt.Errorf("cannot reload phases after decisions plan: %w", err)
+				}
+				phase, plan = state.FindNextPlan(phases)
+				if plan == nil {
+					fmt.Printf("\n%s All plans complete!\n", green("✓"))
+					return nil
+				}
+			}
 		}
 
 		total, completed := state.CountPlans(phases)
@@ -317,6 +364,29 @@ To maximize analysis effectiveness:
 - Be specific about dependencies discovered
 - Flag assumptions that might affect future plans
 - Note any work that was already complete (to avoid duplication)
+
+### Background Task Verification (MANDATORY)
+
+BEFORE signaling ###PLAN_COMPLETE###, you MUST verify all background tasks have finished:
+
+1. **Check for running background tasks:**
+   - If you started tests/builds with ` + "`run_in_background: true`" + `, you MUST wait for completion
+   - Read the output file (from TaskOutput) to verify tests completed AND passed
+   - Use Bash: ` + "`ps aux | grep -E \"(xcodebuild|npm test|pytest|go test)\" | grep -v grep`" + ` to check for running processes
+
+2. **You CANNOT signal ###PLAN_COMPLETE### if:**
+   - Background tests are still running (check process list)
+   - You haven't read and verified test output shows passing
+   - Build processes are still executing
+   - SUMMARY.md has not been created
+
+3. **Verification sequence:**
+   a. Wait for all background tasks to finish (use TaskOutput with block=true)
+   b. Verify test results show PASS (not just "started" or "running")
+   c. Create SUMMARY.md with execution details
+   d. Only then signal ###PLAN_COMPLETE###
+
+Ralph will verify SUMMARY.md exists before accepting the completion signal.
 
 ### Ralph Signals
 
@@ -480,6 +550,33 @@ You CANNOT signal ###PLAN_COMPLETE### if:
 
 If builds/tests fail and you cannot fix them, signal ###BUILD_FAILED:{project}### or ###TEST_FAILED:{project}:{count}###
 
+## Background Task Verification (MANDATORY)
+
+If you started ANY tasks with ` + "`" + `run_in_background: true` + "`" + `, you MUST verify completion:
+
+1. **Wait for background tasks to finish:**
+   - Use TaskOutput tool with block=true to wait for completion
+   - Read the output file to verify results
+
+2. **Check no processes are still running:**
+   - Use Bash: ` + "`" + `ps aux | grep -E "(xcodebuild|npm test|pytest|go test)" | grep -v grep` + "`" + `
+   - Empty output = no running processes
+
+3. **Verify test results show PASS:**
+   - Read the test output file
+   - Look for "PASS" or "succeeded" (not just "started" or "running")
+   - Count actual test results, not just the command starting
+
+4. **Create SUMMARY.md BEFORE signaling:**
+   - Ralph will verify SUMMARY.md exists before accepting the completion signal
+   - If SUMMARY.md is missing, your ###PLAN_COMPLETE### will be rejected
+
+**Verification sequence:**
+a. Wait for all background tasks (TaskOutput with block=true)
+b. Verify test output shows actual PASS results
+c. Create SUMMARY.md with execution details
+d. Only then signal ###PLAN_COMPLETE###
+
 ## Context Management (CRITICAL)
 
 You have ~200K tokens of context. Quality degrades significantly after ~100K tokens.
@@ -604,4 +701,200 @@ func resolveBinaryPath(name string) string {
 	}
 
 	return name
+}
+
+// DecisionCheckpoint represents a checkpoint:decision extracted from a plan
+type DecisionCheckpoint struct {
+	PlanNumber  int
+	PlanName    string
+	PlanPath    string
+	TaskContent string
+	Context     string
+}
+
+// MaybeCreateDecisionsPlan scans a phase for checkpoint:decision tasks and creates a bundled decisions plan
+func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
+	cyan := color.New(color.FgCyan).SprintFunc()
+
+	// Check if decisions plan already exists
+	decisionsPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-00-decisions-PLAN.md", phase.Number))
+	if _, err := os.Stat(decisionsPath); err == nil {
+		// Decisions plan already exists
+		return false, nil
+	}
+
+	// Scan all plans in this phase for checkpoint:decision tasks
+	var decisions []DecisionCheckpoint
+	decisionPattern := regexp.MustCompile(`(?s)<task\s+type="checkpoint:decision"[^>]*>(.*?)</task>`)
+
+	for _, plan := range phase.Plans {
+		content, err := os.ReadFile(plan.Path)
+		if err != nil {
+			continue
+		}
+
+		matches := decisionPattern.FindAllStringSubmatch(string(content), -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				decisions = append(decisions, DecisionCheckpoint{
+					PlanNumber:  plan.Number,
+					PlanName:    plan.Name,
+					PlanPath:    plan.Path,
+					TaskContent: strings.TrimSpace(match[1]),
+				})
+			}
+		}
+	}
+
+	if len(decisions) == 0 {
+		// No decisions found in this phase
+		return false, nil
+	}
+
+	fmt.Printf("[%s] %s Found %d decision checkpoints, creating decisions plan...\n",
+		time.Now().Format("15:04:05"), cyan("Decisions:"), len(decisions))
+
+	// Create the decisions plan
+	err := e.createDecisionsPlan(phase, decisions, decisionsPath)
+	if err != nil {
+		return false, err
+	}
+
+	fmt.Printf("[%s] %s Created %s\n",
+		time.Now().Format("15:04:05"), cyan("Decisions:"), filepath.Base(decisionsPath))
+
+	return true, nil
+}
+
+// createDecisionsPlan generates the bundled decisions plan file
+func (e *Executor) createDecisionsPlan(phase *state.Phase, decisions []DecisionCheckpoint, outPath string) error {
+	var content strings.Builder
+
+	// Write frontmatter
+	content.WriteString(fmt.Sprintf(`---
+phase: %d
+plan: 0
+type: decisions
+status: pending
+---
+
+# Phase %d Decisions: Upfront Choices
+
+## Objective
+
+Make all architectural and approach decisions before executing phase plans.
+These decisions will be referenced by subsequent plans via STATE.md.
+
+## Decisions Required
+
+`, phase.Number, phase.Number))
+
+	// Write each decision
+	for i, d := range decisions {
+		affectedPlans := fmt.Sprintf("%02d-%02d", phase.Number, d.PlanNumber)
+		content.WriteString(fmt.Sprintf(`### Decision %d: From Plan %s
+
+**Original plan:** %s
+**Affects:** Plan %s and potentially subsequent plans
+
+%s
+
+<task type="checkpoint:decision">
+%s
+</task>
+
+`, i+1, d.PlanName, d.PlanPath, affectedPlans, d.Context, d.TaskContent))
+	}
+
+	// Write recording instructions
+	content.WriteString(`## Recording Decisions
+
+After each decision is made:
+1. Record the decision in STATE.md Decisions table
+2. Include the rationale
+3. Note which plans are affected
+
+Subsequent plans will read STATE.md to access these decisions.
+
+## Verification
+
+<verification>
+- [ ] All decisions have been made
+- [ ] Each decision is recorded in STATE.md
+- [ ] Decision rationales are documented
+</verification>
+
+## Success Criteria
+
+- All architectural and approach decisions are finalized
+- STATE.md Decisions table is populated with all choices
+- Team is aligned on the approach before execution begins
+`)
+
+	return os.WriteFile(outPath, []byte(content.String()), 0644)
+}
+
+// CommitAndPushRepos commits and pushes changes in all workspace repos
+func (e *Executor) CommitAndPushRepos(planId string) error {
+	// Find all git repos in workspace (submodules or sibling repos)
+	repos := []string{
+		e.config.WorkDir, // Main workspace (e.g., mix/)
+	}
+
+	// Check for common submodule/sibling patterns
+	possibleRepos := []string{"ar", "mix-backend", "mix-dashboard", "mix-web", "plans", "ralph"}
+	for _, name := range possibleRepos {
+		repoPath := filepath.Join(e.config.WorkDir, name)
+		gitPath := filepath.Join(repoPath, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			repos = append(repos, repoPath)
+		}
+	}
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+
+	for _, repo := range repos {
+		// Check if there are changes to commit
+		statusCmd := exec.Command("git", "-C", repo, "status", "--porcelain")
+		output, _ := statusCmd.Output()
+		if len(output) == 0 {
+			continue // No changes in this repo
+		}
+
+		repoName := filepath.Base(repo)
+		fmt.Printf("[%s] %s Committing changes in %s\n",
+			time.Now().Format("15:04:05"), cyan("Git:"), repoName)
+
+		// Stage all changes
+		addCmd := exec.Command("git", "-C", repo, "add", "-A")
+		if err := addCmd.Run(); err != nil {
+			fmt.Printf("[%s] %s Failed to stage in %s: %v\n",
+				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			continue
+		}
+
+		// Commit with plan reference
+		commitMsg := fmt.Sprintf("chore(%s): auto-commit after plan completion", planId)
+		commitCmd := exec.Command("git", "-C", repo, "commit", "-m", commitMsg)
+		if err := commitCmd.Run(); err != nil {
+			fmt.Printf("[%s] %s Failed to commit in %s: %v\n",
+				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			continue
+		}
+
+		// Push to current branch
+		pushCmd := exec.Command("git", "-C", repo, "push")
+		if err := pushCmd.Run(); err != nil {
+			fmt.Printf("[%s] %s Failed to push %s: %v\n",
+				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			continue
+		}
+
+		fmt.Printf("[%s] %s Pushed %s\n",
+			time.Now().Format("15:04:05"), green("✓"), repoName)
+	}
+
+	return nil
 }

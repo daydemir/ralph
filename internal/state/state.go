@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // State represents the current project state parsed from STATE.md
@@ -214,4 +215,140 @@ func CountPlans(phases []Phase) (total, completed int) {
 		}
 	}
 	return total, completed
+}
+
+// UpdateStateFile updates STATE.md with current progress
+func UpdateStateFile(planningDir string, phases []Phase) error {
+	statePath := filepath.Join(planningDir, "STATE.md")
+
+	// Read current content
+	content, err := os.ReadFile(statePath)
+	if err != nil {
+		return fmt.Errorf("cannot read STATE.md: %w", err)
+	}
+
+	// Calculate progress
+	total, completed := CountPlans(phases)
+	percentage := 0
+	if total > 0 {
+		percentage = (completed * 100) / total
+	}
+
+	// Build completion list (e.g., "01-01, 01-02, 01-03")
+	var completedList []string
+	for _, phase := range phases {
+		for _, plan := range phase.Plans {
+			if plan.IsCompleted {
+				completedList = append(completedList,
+					fmt.Sprintf("%02d-%02d", phase.Number, plan.Number))
+			}
+		}
+	}
+
+	// Update Plan line
+	var planLine string
+	if completed == 0 {
+		planLine = "Plan: Not started"
+	} else {
+		planLine = fmt.Sprintf("Plan: %d of %d complete (%s)",
+			completed, total, strings.Join(completedList, ", "))
+	}
+
+	// Update Status line
+	nextPhase, nextPlan := FindNextPlan(phases)
+	var statusLine string
+	if nextPlan != nil {
+		statusLine = fmt.Sprintf("Status: In progress - ready for %02d-%02d",
+			nextPhase.Number, nextPlan.Number)
+	} else {
+		statusLine = "Status: All plans complete"
+	}
+
+	// Update Progress bar (10 chars)
+	filled := (percentage * 10) / 100
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", 10-filled)
+	progressLine := fmt.Sprintf("Progress: %s %d%%", bar, percentage)
+
+	// Update Last activity
+	today := time.Now().Format("2006-01-02")
+	activityLine := fmt.Sprintf("Last activity: %s — Plan completed", today)
+
+	// Update Session Continuity section
+	sessionLine := fmt.Sprintf("Last session: %s", today)
+	var stoppedLine, resumeLine string
+	if nextPlan != nil && len(completedList) > 0 {
+		stoppedLine = fmt.Sprintf("Stopped at: Plan %s complete, ready for next",
+			completedList[len(completedList)-1])
+		resumeLine = fmt.Sprintf("Resume file: %s", nextPlan.Path)
+	} else if nextPlan == nil {
+		stoppedLine = "Stopped at: All plans complete"
+		resumeLine = "Resume file: None"
+	} else {
+		stoppedLine = "Stopped at: Starting"
+		resumeLine = fmt.Sprintf("Resume file: %s", nextPlan.Path)
+	}
+
+	// Apply updates using regex replacements
+	text := string(content)
+	text = regexp.MustCompile(`(?m)^Plan:.*$`).ReplaceAllString(text, planLine)
+	text = regexp.MustCompile(`(?m)^Status:.*$`).ReplaceAllString(text, statusLine)
+	text = regexp.MustCompile(`(?m)^Progress:.*$`).ReplaceAllString(text, progressLine)
+	text = regexp.MustCompile(`(?m)^Last activity:.*$`).ReplaceAllString(text, activityLine)
+	text = regexp.MustCompile(`(?m)^Last session:.*$`).ReplaceAllString(text, sessionLine)
+	text = regexp.MustCompile(`(?m)^Stopped at:.*$`).ReplaceAllString(text, stoppedLine)
+	text = regexp.MustCompile(`(?m)^Resume file:.*$`).ReplaceAllString(text, resumeLine)
+
+	return os.WriteFile(statePath, []byte(text), 0644)
+}
+
+// UpdateRoadmap updates ROADMAP.md checkboxes and summary table
+func UpdateRoadmap(planningDir string, phases []Phase) error {
+	roadmapPath := filepath.Join(planningDir, "ROADMAP.md")
+
+	content, err := os.ReadFile(roadmapPath)
+	if err != nil {
+		return fmt.Errorf("cannot read ROADMAP.md: %w", err)
+	}
+
+	text := string(content)
+
+	// 1. Update plan checkboxes (- [ ] XX-YY: → - [x] XX-YY: ✅)
+	for _, phase := range phases {
+		for _, plan := range phase.Plans {
+			planId := fmt.Sprintf("%02d-%02d", phase.Number, plan.Number)
+			if plan.IsCompleted {
+				// Match patterns like "- [ ] 01-01:" and replace with "- [x] 01-01: ... ✅"
+				pattern := regexp.MustCompile(`- \[ \] ` + planId + `:([^\n]+)`)
+				text = pattern.ReplaceAllString(text, "- [x] "+planId+":$1 ✅")
+			}
+		}
+	}
+
+	// 2. Update summary table row for each phase
+	// Format: | 1. Feature Verification | 3/10 | In progress | - |
+	for _, phase := range phases {
+		totalPlans := len(phase.Plans)
+		completedPlans := 0
+		for _, p := range phase.Plans {
+			if p.IsCompleted {
+				completedPlans++
+			}
+		}
+
+		status := "Not started"
+		if completedPlans > 0 && completedPlans < totalPlans {
+			status = "In progress"
+		} else if completedPlans == totalPlans && totalPlans > 0 {
+			status = "Complete"
+		}
+
+		// Update the row: | X. Phase Name | Y/Z | Status | - |
+		pattern := regexp.MustCompile(
+			fmt.Sprintf(`\| %d\. ([^|]+)\| \d+/\d+ \| [^|]+ \|`, phase.Number))
+		replacement := fmt.Sprintf("| %d. $1| %d/%d | %s |",
+			phase.Number, completedPlans, totalPlans, status)
+		text = pattern.ReplaceAllString(text, replacement)
+	}
+
+	return os.WriteFile(roadmapPath, []byte(text), 0644)
 }
