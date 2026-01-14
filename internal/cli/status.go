@@ -258,10 +258,29 @@ func printSuggestedActions(phases []state.Phase, nextPlan *state.Plan, total, co
 		fmt.Printf("    %-30s %s\n", cyan("ralph plan 1"), dim("Create executable plans for Phase 1"))
 
 	} else {
-		// All complete!
-		fmt.Printf("  %s All work complete! Consider:\n", green("✓"))
-		fmt.Printf("    %-30s %s\n", cyan("ralph add-phase \"description\""), dim("Add more work to roadmap"))
-		fmt.Printf("    %s\n", dim("Or ship your milestone and start a new project"))
+		// All plans in existing phases are complete
+		// Check if there are phases without plans (empty directories)
+		phaseNeedingPlans := findNextPhaseWithoutPlans(phases)
+		if phaseNeedingPlans != nil {
+			// Phase exists but has no plans - suggest planning it
+			// Find the last completed phase number
+			lastCompletedPhase := 0
+			for _, p := range phases {
+				if p.IsCompleted && p.Number > lastCompletedPhase {
+					lastCompletedPhase = p.Number
+				}
+			}
+			fmt.Printf("  %s Phase %d complete! Next phase needs planning:\n", green("✓"), lastCompletedPhase)
+			fmt.Printf("    %-30s %s\n", cyan(fmt.Sprintf("ralph discuss %d", phaseNeedingPlans.Number)),
+				dim(fmt.Sprintf("Gather context for Phase %d", phaseNeedingPlans.Number)))
+			fmt.Printf("    %-30s %s\n", cyan(fmt.Sprintf("ralph plan %d", phaseNeedingPlans.Number)),
+				dim(fmt.Sprintf("Create plans for Phase %d", phaseNeedingPlans.Number)))
+		} else {
+			// Truly all complete!
+			fmt.Printf("  %s All work complete! Consider:\n", green("✓"))
+			fmt.Printf("    %-30s %s\n", cyan("ralph add-phase \"description\""), dim("Add more work to roadmap"))
+			fmt.Printf("    %s\n", dim("Or ship your milestone and start a new project"))
+		}
 	}
 
 	fmt.Println()
@@ -367,3 +386,4 @@ func findNextPhaseWithoutPlans(phases []state.Phase) *state.Phase {
 	}
 	return nil
 }
+
