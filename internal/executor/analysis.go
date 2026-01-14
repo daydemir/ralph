@@ -71,7 +71,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	// Build the analysis prompt
 	prompt := e.buildAnalysisPrompt(plan, discoveries, subsequentPlans)
 
-	// Execute analysis with Claude
+	// Execute analysis with Claude - includes Write tool for plan creation/restructuring
 	opts := llm.ExecuteOptions{
 		Prompt: prompt,
 		ContextFiles: []string{
@@ -80,7 +80,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 		},
 		Model: e.config.Model,
 		AllowedTools: []string{
-			"Read", "Write", "Edit", "Glob", "Grep",
+			"Read", "Write", "Edit", "Glob", "Grep", "Bash",
 		},
 		WorkDir: e.config.WorkDir,
 	}
@@ -193,8 +193,8 @@ Review each discovery and determine its impact on subsequent plans.
 
 **High-impact types for plan restructuring:**
 - **assumption**: A decision was made without full information - check if subsequent plans rely on this assumption
-- **scope-creep**: Work was discovered that wasn't in any plan - note what new plans might be needed
-- **dependency**: An unexpected dependency was found - check if plan order needs adjustment
+- **scope-creep**: Work was discovered that wasn't in any plan - may require new plans
+- **dependency**: An unexpected dependency was found - may require plan reordering
 - **questionable**: Suspicious code was found - add review notes to relevant plans
 
 **Standard types:**
@@ -202,15 +202,81 @@ Review each discovery and determine its impact on subsequent plans.
 - **technical-debt**, **tooling-friction**, **env-discovery**: Document for future reference
 - **insight**, **blocker**: May affect how subsequent tasks are approached
 
+### Plan Restructuring Authority
+
+You have FULL AUTHORITY to restructure the plan sequence based on discoveries. This includes:
+
+#### 1. REORDER PLANS
+If discoveries show Plan X depends on Plan Y (but Y comes after X), reorder the sequence:
+- Renumber plan files to reflect the new order (e.g., if Plan 05 must come before Plan 03, rename files accordingly)
+- Update ROADMAP.md to show the new sequence
+- Document the reason for reordering
+
+Example:
+  Before: Plan 1 -> Plan 2 -> Plan 3 -> Plan 4 -> Plan 5
+  Discovery: Plan 3 depends on Plan 5
+  After:  Plan 1 -> Plan 2 -> Plan 5 -> Plan 3 -> Plan 4
+
+#### 2. CREATE NEW PLANS
+If discoveries reveal work not covered by any existing plan:
+- Create new XX-PLAN.md files using the standard plan template
+- Insert at the appropriate position in the sequence
+- Update ROADMAP.md to include the new plan
+- Set status to PENDING
+
+New plan template structure:
+` + "```" + `markdown
+---
+phase: [phase-number]
+plan: [plan-number]
+status: pending
+---
+
+# Phase [X] Plan [Y]: [Name]
+
+## Objective
+[What this plan accomplishes - derived from discovery]
+
+## Context
+Created by analysis agent based on discovery:
+- Type: [discovery type]
+- From: [original plan path]
+- Detail: [discovery detail]
+
+## Tasks
+<task type="auto">
+[Task description]
+<verify>[Verification command]</verify>
+</task>
+
+## Verification
+- [ ] [Verification criteria]
+
+## Success Criteria
+- [Criteria]
+` + "```" + `
+
+#### 3. SKIP/REMOVE PLANS
+If discoveries show planned work is already complete:
+- Mark the plan as SKIPPED in ROADMAP.md with reason
+- Document evidence of completion (files that exist, tests that pass, etc.)
+- Remove from active execution queue (but keep original file for reference)
+
+#### 4. UPDATE ROADMAP.md
+ALL restructuring changes MUST be reflected in ROADMAP.md:
+- Reordering: Update phase/plan sequence
+- New plans: Add entry at appropriate position
+- Skipped plans: Mark with SKIPPED status and reason
+
 ### Action Guidelines
 
 For discoveries with action "needs-fix", "needs-implementation", or "needs-plan":
 1. Read the relevant subsequent plan files
 2. Determine if the discovery:
-   - Invalidates tasks in a plan (work is already done, or approach is wrong)
-   - Means a dependency must be resolved first
-   - Requires a new plan to be created
-   - Suggests plan order should change (dependency found)
+   - Invalidates tasks in a plan (work is already done, or approach is wrong) -> SKIP the plan
+   - Means a dependency must be resolved first -> REORDER plans
+   - Requires work not covered by any plan -> CREATE new plan
+   - Suggests plan order should change -> REORDER plans
 
 For discoveries with action "needs-documentation":
 1. Suggest updates to CLAUDE.md or project documentation
@@ -220,24 +286,33 @@ For discoveries with action "needs-documentation":
 For discoveries with action "needs-investigation":
 1. Add investigation notes to relevant plans
 2. Flag assumptions that need verification before proceeding
+3. Consider creating a new investigation plan if scope is significant
 
 For each plan that needs updating:
 1. Add a note in the plan's <context> section referencing the discovery
 2. If a task is invalidated, add a note explaining why
 3. If a blocker exists, add a <blocker> tag at the top
-4. If plan order should change, note the recommended reordering
+
+## Safety Considerations
+- All restructuring is logged in execution history
+- Original plans are preserved (renamed, not deleted)
+- ROADMAP.md serves as audit trail
+- Document the discovery that triggered each change
 
 ## Rules
-- Only modify subsequent plans if a discovery directly impacts them
-- Do NOT create new plan files - just note what would be needed
-- Do NOT modify the completed plan
-- Keep changes minimal and targeted
-- Flag critical assumptions and scope-creep for human review
+- Only restructure if discoveries directly warrant it
+- Do NOT modify the just-completed plan (only subsequent plans)
+- Keep changes minimal and targeted to the discovery
+- Flag critical assumptions and scope-creep that may need human review
+- Commit changes with message: "chore(analysis): restructure plans based on [plan] discoveries"
 
 ## Completion
 When done analyzing, output a brief summary:
 - Number of plans reviewed
 - Number of plans modified
+- Plans reordered (if any)
+- New plans created (if any)
+- Plans skipped (if any)
 - Any critical issues that need immediate attention
 
 Signal completion with: ###ANALYSIS_COMPLETE###

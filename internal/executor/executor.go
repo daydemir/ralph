@@ -14,6 +14,33 @@ import (
 	"github.com/fatih/color"
 )
 
+// gsdWorkflowPath returns the path to the GSD execute-phase workflow
+func gsdWorkflowPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "get-shit-done", "workflows", "execute-phase.md")
+}
+
+// loadGSDWorkflow attempts to load the GSD execute-phase workflow from the user's home directory
+func loadGSDWorkflow() (string, error) {
+	gsdPath := gsdWorkflowPath()
+	if gsdPath == "" {
+		return "", fmt.Errorf("HOME not set")
+	}
+
+	content, err := os.ReadFile(gsdPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("GSD workflow not found at %s", gsdPath)
+		}
+		return "", err
+	}
+
+	return string(content), nil
+}
+
 // FailureType indicates the severity of a failure
 type FailureType int
 
@@ -241,6 +268,87 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 }
 
 func (e *Executor) buildExecutionPrompt(planPath string) string {
+	// Try to load GSD workflow as base
+	gsdBase, err := loadGSDWorkflow()
+	if err != nil {
+		// Log warning and use fallback
+		yellow := color.New(color.FgYellow).SprintFunc()
+		fmt.Fprintf(os.Stderr, "[%s] %s GSD workflow not available: %v (using fallback)\n",
+			time.Now().Format("15:04:05"), yellow("⚠"), err)
+		return e.buildFallbackExecutionPrompt(planPath)
+	}
+
+	// Build Ralph-specific augmentations
+	ralphAugmentations := buildRalphAugmentations(planPath)
+
+	return gsdBase + "\n\n" + ralphAugmentations
+}
+
+// buildRalphAugmentations returns Ralph-specific additions to append to GSD workflow
+func buildRalphAugmentations(planPath string) string {
+	return fmt.Sprintf(`---
+
+## Ralph Augmentations
+
+The following are Ralph-specific extensions to the GSD execution workflow.
+
+### Plan Location
+%s
+
+### Extended Discovery Types (Ralph-specific)
+
+In addition to the standard discovery types, Ralph recognizes:
+- **assumption**: Decision made without full information (IMPORTANT for analysis agent)
+- **scope-creep**: Work discovered that wasn't in the plan (IMPORTANT for analysis agent)
+- **dependency**: Unexpected dependency between tasks/plans (IMPORTANT for analysis agent)
+- **questionable**: Suspicious code or pattern worth reviewing (IMPORTANT for analysis agent)
+
+These types are critical for Ralph's post-execution analysis agent, which may reorder plans, create new plans, or skip completed work based on these discoveries.
+
+### Post-Execution Analysis
+
+After you complete (or fail), Ralph will automatically spawn an analysis agent to:
+1. Parse all discoveries from this execution
+2. Review subsequent plans for impact
+3. Potentially restructure the plan sequence based on findings
+
+To maximize analysis effectiveness:
+- Record discoveries AS YOU FIND THEM (not at the end)
+- Be specific about dependencies discovered
+- Flag assumptions that might affect future plans
+- Note any work that was already complete (to avoid duplication)
+
+### Ralph Signals
+
+Ralph monitors for these signals in addition to GSD signals:
+- ###PLAN_COMPLETE### - All tasks done, verified, builds and tests pass
+- ###TASK_FAILED:{name}### - A task couldn't be completed
+- ###PLAN_FAILED:{check}### - Plan verification failed
+- ###BUILD_FAILED:{project}### - Build failed (e.g., ios, backend)
+- ###TEST_FAILED:{project}:{count}### - Tests failed that weren't failing before
+- ###BLOCKED:{reason}### - Need human intervention
+- ###BAILOUT:{reason}### - Preserving context, update Progress first
+
+### Context Management (Ralph Safety Net)
+
+Ralph monitors your token usage and will terminate at 120K tokens as a safety net.
+
+**Self-monitoring heuristics:**
+- Count your tool calls: if > 50 tool calls without task completion, you're burning context
+- Watch for repeated errors: 3+ retries of same fix = stuck, bail out
+- File reading volume: if you've read > 20 files without progress, context is bloated
+
+**At ~100K tokens, proactively bail out:**
+1. Update the PLAN.md Progress section with current state
+2. Update the ## Discoveries section with any findings
+3. Document what worked, what failed, and next steps
+4. Signal: ###BAILOUT:context_preservation###
+
+Begin execution now.`, planPath)
+}
+
+// buildFallbackExecutionPrompt returns the standalone execution prompt when GSD is unavailable
+func (e *Executor) buildFallbackExecutionPrompt(planPath string) string {
 	return fmt.Sprintf(`You are executing a plan autonomously. Follow the plan exactly.
 
 ## Plan Location
