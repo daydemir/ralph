@@ -413,6 +413,21 @@ For observations with action "needs-investigation":
 2. Flag assumptions that need verification before proceeding
 3. Consider creating a new investigation plan if scope is significant
 
+### Test Failure Pattern Analysis
+
+When reviewing test-related observations (test-failed, test-infrastructure, tooling-friction):
+
+1. **Count occurrences**: If same test infrastructure issue appears in 2+ plans:
+   - Create a new "fix-test-infrastructure" plan to resolve it once
+   - Example: "xcodebuild syntax issues in 3 plans -> create plan to document working patterns in CLAUDE.md"
+
+2. **Check for systemic issues**:
+   - Repeated simulator crashes -> plan to fix simulator setup
+   - Repeated xcodebuild errors -> plan to document working commands
+   - Repeated timeout issues -> plan to optimize test configuration
+
+3. **Recommend infrastructure plans** when test tooling wastes >60 minutes total across plans
+
 For each plan that needs updating:
 1. Add a note in the plan's <context> section referencing the observation
 2. If a task is invalidated, add a note explaining why

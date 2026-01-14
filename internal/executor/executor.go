@@ -362,6 +362,8 @@ Ralph's analysis agent parses observations to improve subsequent plans. Types:
 - **already-complete**: Work was already done before execution
 - **checkpoint-automated**: Checkpoint verification that was automated
 - **tooling-friction**: Tool/environment issue that slowed progress
+- **test-failed**: Test(s) failed during execution - enumerate test names
+- **test-infrastructure**: Test environment issue (simulator, timeout, xcodebuild syntax)
 
 ### Observation Format (CRITICAL - Analyzer Cannot Parse Prose)
 
@@ -392,6 +394,50 @@ Record routine findings. Examples:
 - "API returns different format than docs say" → type="api-issue", action="needs-investigation"
 
 **The analysis agent needs DATA to work with. Under-reporting = no analysis happens.**
+
+### Documenting Test Failures (CRITICAL)
+
+Test failures require STRUCTURED observations, not prose notes. The analysis agent:
+- Can detect patterns across plans (e.g., "xcodebuild issues in 4/5 plans")
+- Can recommend infrastructure fixes when issues repeat
+- CANNOT parse prose like "tests failed, see output"
+
+**When tests fail:**
+1. Use type="test-failed" (NOT generic "blocker")
+2. List EACH failed test by name
+3. Include error messages or expected vs actual
+4. For tooling issues (xcodebuild syntax), use type="test-infrastructure"
+
+**Example - Test Failures:**
+` + "```" + `xml
+<observation type="test-failed" severity="high">
+  <title>3 SpatialAudioService tests failing</title>
+  <detail>
+    Failed tests:
+    - testPlaySpatialAudio_atPosition: Expected position (1,2,3), got (0,0,0)
+    - testStopAllSpatialAudio: Source still playing after stop
+    - testPauseSpatialAudio: Playback not paused
+    Root cause: uninitialized position variable in SpatialAudioService.play()
+  </detail>
+  <file>ar/AR/Unit Tests iOS/AudioSpatialTests.swift</file>
+  <action>needs-fix</action>
+</observation>
+` + "```" + `
+
+**Example - Test Infrastructure:**
+` + "```" + `xml
+<observation type="test-infrastructure" severity="medium">
+  <title>xcodebuild -only-testing syntax unclear</title>
+  <detail>
+    Spent 30+ minutes on xcodebuild test filtering. Attempted syntaxes:
+    - -only-testing:TestTarget/TestClass (Unknown build action error)
+    - -only-testing "TestTarget/TestClass" (same error)
+    Documentation unclear. This blocked test verification for SpatialAudioService.
+  </detail>
+  <file>ar/AR/AR.xcodeproj</file>
+  <action>needs-documentation</action>
+</observation>
+` + "```" + `
 
 ### Recording Observations (Use Subagents to Save Context)
 
