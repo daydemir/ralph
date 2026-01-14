@@ -349,6 +349,7 @@ In addition to the standard discovery types, Ralph recognizes:
 - **scope-creep**: Work discovered that wasn't in the plan (IMPORTANT for analysis agent)
 - **dependency**: Unexpected dependency between tasks/plans (IMPORTANT for analysis agent)
 - **questionable**: Suspicious code or pattern worth reviewing (IMPORTANT for analysis agent)
+- **already-complete**: Work in this task was already done before execution (IMPORTANT for analysis agent)
 
 These types are critical for Ralph's post-execution analysis agent, which may reorder plans, create new plans, or skip completed work based on these discoveries.
 
@@ -381,6 +382,37 @@ Record discoveries for:
 - Assumptions you made about how something works
 
 The analysis agent uses discoveries to improve subsequent plans. Under-reporting means lost learning. Over-reporting is cheap - just record it.
+
+### Pre-Existing Work Handling (IMPORTANT)
+
+When you discover that work in a task is ALREADY COMPLETE (files exist, code already implemented):
+
+1. **Record a discovery:**
+   ` + "```" + `markdown
+   <discovery type="already-complete" severity="info">
+     <title>Task N already implemented</title>
+     <detail>The [what] already exists at [path]. Likely done in previous session or by another plan.</detail>
+     <file>path/to/existing/file</file>
+     <action>none</action>
+   </discovery>
+   ` + "```" + `
+
+2. **Update Progress section:**
+   - Mark the task as ` + "`[ALREADY_COMPLETE]`" + ` (not ` + "`[COMPLETE]`" + `)
+   - Note when/where it was likely done if easily determinable
+
+3. **Verify existing work meets requirements:**
+   - Check that the pre-existing implementation satisfies the task's <done> criteria
+   - If it doesn't fully meet requirements, treat it as a partial implementation and complete it
+
+4. **Continue with remaining tasks and completion:**
+   - Create SUMMARY.md documenting what was found
+   - Signal ###PLAN_COMPLETE### as normal
+
+**DO NOT** get stuck investigating the history of pre-existing work.
+**DO NOT** exit without signaling completion.
+
+The goal is to document what exists and move forward, not to forensically analyze when it was created.
 
 ### Background Task Verification (MANDATORY)
 
@@ -519,6 +551,7 @@ Add a ## Discoveries section to the PLAN.md file with XML-structured entries:
 - scope-creep: Work discovered that wasn't in the plan (IMPORTANT for analysis)
 - dependency: Unexpected dependency between tasks/plans (IMPORTANT for analysis)
 - questionable: Suspicious code or pattern worth reviewing (IMPORTANT for analysis)
+- already-complete: Work in this task was already done before execution (IMPORTANT for analysis)
 
 **Severity:** critical, high, medium, low, info
 **Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, none
@@ -561,6 +594,37 @@ Example discoveries:
 - Workarounds you used
 
 Record discoveries AS YOU FIND THEM, not at the end. The analysis agent uses discoveries to improve subsequent plans. Under-reporting = lost learning. Over-reporting is cheap.
+
+## Pre-Existing Work Handling (IMPORTANT)
+
+When you discover that work in a task is ALREADY COMPLETE (files exist, code already implemented):
+
+1. **Record a discovery:**
+   ` + "```" + `markdown
+   <discovery type="already-complete" severity="info">
+     <title>Task N already implemented</title>
+     <detail>The [what] already exists at [path]. Likely done in previous session or by another plan.</detail>
+     <file>path/to/existing/file</file>
+     <action>none</action>
+   </discovery>
+   ` + "```" + `
+
+2. **Update Progress section:**
+   - Mark the task as ` + "`[ALREADY_COMPLETE]`" + ` (not ` + "`[COMPLETE]`" + `)
+   - Note when/where it was likely done if easily determinable
+
+3. **Verify existing work meets requirements:**
+   - Check that the pre-existing implementation satisfies the task's <done> criteria
+   - If it doesn't fully meet requirements, treat it as a partial implementation and complete it
+
+4. **Continue with remaining tasks and completion:**
+   - Create SUMMARY.md documenting what was found
+   - Signal ###PLAN_COMPLETE### as normal
+
+**DO NOT** get stuck investigating the history of pre-existing work.
+**DO NOT** exit without signaling completion.
+
+The goal is to document what exists and move forward, not to forensically analyze when it was created.
 
 ## Build & Test Verification (MANDATORY)
 
