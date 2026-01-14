@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	runLoop       bool
-	runLoopCount  int
-	runModel      string
+	runLoop         bool
+	runLoopCount    int
+	runModel        string
+	runSkipAnalysis bool
 )
 
 var runCmd = &cobra.Command{
@@ -92,13 +93,21 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 			if maxIterations <= 0 {
 				maxIterations = 10
 			}
-			return exec.Loop(ctx, maxIterations)
+			return exec.LoopWithAnalysis(ctx, maxIterations, runSkipAnalysis)
 		}
 
 		// Single plan execution
 		result := exec.ExecutePlan(ctx, phase, plan)
 		if !result.Success {
 			return result.Error
+		}
+
+		// Run post-analysis to check discoveries and update subsequent plans
+		analysisResult := exec.RunPostAnalysis(ctx, phase, plan, runSkipAnalysis)
+		if analysisResult.Error != nil {
+			fmt.Printf("Warning: post-analysis failed: %v\n", analysisResult.Error)
+		} else if analysisResult.DiscoveriesFound > 0 {
+			fmt.Printf("Analyzed %d discoveries\n", analysisResult.DiscoveriesFound)
 		}
 
 		// Show what's next
@@ -121,5 +130,6 @@ func init() {
 	runCmd.Flags().BoolVar(&runLoop, "loop", false, "run autonomous loop")
 	runCmd.Flags().IntVarP(&runLoopCount, "count", "n", 10, "max iterations for loop mode")
 	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
+	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run discovery analysis")
 	rootCmd.AddCommand(runCmd)
 }

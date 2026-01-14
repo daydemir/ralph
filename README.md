@@ -199,6 +199,21 @@ Before planning a phase, you can optionally run **discover** and/or **discuss** 
 
 Both commands are optional but recommended for non-trivial phases. The context they generate helps `ralph plan` create better plans.
 
+## Interactive Session Workflow
+
+Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive Claude sessions**. Here's how to use them:
+
+1. **Run the command** - A Claude conversation starts
+2. **Discuss with Claude** - Work through the topic until Claude indicates completion
+3. **Look for the completion signal** - Claude will say something like:
+   - "I've updated CONTEXT.md with our discussion"
+   - "I've created the PLAN.md files"
+   - "RESEARCH.md has been saved"
+4. **Exit the session** - Type `/exit` or press `Ctrl+C`
+5. **Check progress** - Run `ralph status` to see your updated state
+
+**Tip:** These sessions are conversational. Ask follow-up questions, request changes, or explore alternatives before Claude finalizes the output. Once Claude confirms the file has been written, your work is saved and you can safely exit.
+
 ## Commands
 
 ### Setup Commands (One-Time)

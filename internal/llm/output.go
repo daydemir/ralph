@@ -14,7 +14,7 @@ import (
 
 // FailureSignal represents a detected failure in Claude's output
 type FailureSignal struct {
-	Type   string // "task_failed", "plan_failed", "blocked"
+	Type   string // "task_failed", "plan_failed", "blocked", "bailout", "build_failed", "test_failed"
 	Detail string // The specific name/reason from the signal
 }
 
@@ -186,6 +186,8 @@ func ParseStream(reader io.Reader, handler OutputHandler) error {
 	planFailedPattern := regexp.MustCompile(`###PLAN_FAILED:([^#]+)###`)
 	blockedPattern := regexp.MustCompile(`###BLOCKED:([^#]+)###`)
 	bailoutPattern := regexp.MustCompile(`###BAILOUT:([^#]+)###`)
+	buildFailedPattern := regexp.MustCompile(`###BUILD_FAILED:([^#]+)###`)
+	testFailedPattern := regexp.MustCompile(`###TEST_FAILED:([^#:]+):?([^#]*)###`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -245,6 +247,16 @@ func ParseStream(reader io.Reader, handler OutputHandler) error {
 						}
 						if match := bailoutPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "bailout", Detail: strings.TrimSpace(match[1])})
+						}
+						if match := buildFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
+							handler.OnFailure(FailureSignal{Type: "build_failed", Detail: strings.TrimSpace(match[1])})
+						}
+						if match := testFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
+							detail := strings.TrimSpace(match[1])
+							if len(match) > 2 && match[2] != "" {
+								detail = detail + ":" + strings.TrimSpace(match[2])
+							}
+							handler.OnFailure(FailureSignal{Type: "test_failed", Detail: detail})
 						}
 						// Output text
 						handler.OnText(cleanText(content.Text))

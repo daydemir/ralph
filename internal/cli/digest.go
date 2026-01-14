@@ -1,0 +1,150 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/daydemir/ralph/internal/executor"
+	"github.com/daydemir/ralph/internal/planner"
+	"github.com/daydemir/ralph/internal/state"
+	"github.com/spf13/cobra"
+)
+
+var digestCmd = &cobra.Command{
+	Use:   "digest [plan-path]",
+	Short: "Analyze discoveries from a completed plan",
+	Long: `Run post-execution analysis on a completed plan's discoveries.
+
+This command is automatically run after 'ralph run', but can be
+invoked manually to re-analyze after manual fixes or to review
+discoveries from a specific plan.
+
+Examples:
+  ralph digest                                    # Analyze most recently completed plan
+  ralph digest .planning/phases/01-*/01-03-PLAN.md  # Analyze specific plan
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+
+		gsd := planner.NewGSD("", cwd)
+		if !gsd.HasRoadmap() {
+			return fmt.Errorf("no ROADMAP.md found - run 'ralph roadmap' first")
+		}
+
+		planningDir := gsd.PlanningDir()
+
+		// Load phases
+		phases, err := state.LoadPhases(planningDir)
+		if err != nil {
+			return fmt.Errorf("cannot load phases: %w", err)
+		}
+
+		var targetPlan *state.Plan
+		var targetPhase *state.Phase
+
+		if len(args) > 0 {
+			// Find the specified plan
+			planPath := args[0]
+			if !filepath.IsAbs(planPath) {
+				planPath = filepath.Join(cwd, planPath)
+			}
+
+			for i := range phases {
+				for j := range phases[i].Plans {
+					if phases[i].Plans[j].Path == planPath {
+						targetPlan = &phases[i].Plans[j]
+						targetPhase = &phases[i]
+						break
+					}
+				}
+				if targetPlan != nil {
+					break
+				}
+			}
+
+			if targetPlan == nil {
+				return fmt.Errorf("plan not found: %s", args[0])
+			}
+		} else {
+			// Find most recently completed plan
+			for i := len(phases) - 1; i >= 0; i-- {
+				for j := len(phases[i].Plans) - 1; j >= 0; j-- {
+					if phases[i].Plans[j].IsCompleted {
+						targetPlan = &phases[i].Plans[j]
+						targetPhase = &phases[i]
+						break
+					}
+				}
+				if targetPlan != nil {
+					break
+				}
+			}
+
+			if targetPlan == nil {
+				fmt.Println("No completed plans found to analyze.")
+				return nil
+			}
+		}
+
+		fmt.Printf("Analyzing: %s\n\n", targetPlan.Name)
+
+		// Read the plan content
+		content, err := os.ReadFile(targetPlan.Path)
+		if err != nil {
+			return fmt.Errorf("cannot read plan: %w", err)
+		}
+
+		// Parse discoveries
+		discoveries := executor.ParseDiscoveries(string(content))
+
+		if len(discoveries) == 0 {
+			fmt.Println("No discoveries found in this plan.")
+			return nil
+		}
+
+		fmt.Printf("Found %d discoveries:\n\n", len(discoveries))
+		for i, d := range discoveries {
+			fmt.Printf("%d. [%s/%s] %s\n", i+1, d.Type, d.Severity, d.Title)
+			fmt.Printf("   %s\n", d.Detail)
+			if d.File != "" {
+				fmt.Printf("   File: %s\n", d.File)
+			}
+			fmt.Printf("   Action: %s\n\n", d.Action)
+		}
+
+		// Check for actionable discoveries
+		if !executor.HasActionableDiscoveries(discoveries) {
+			fmt.Println("No actionable discoveries (all are informational).")
+			return nil
+		}
+
+		// Run full analysis
+		fmt.Println("Running analysis to update subsequent plans...")
+
+		config := executor.DefaultConfig(cwd)
+		exec := executor.New(config)
+
+		ctx := context.Background()
+		result := exec.RunPostAnalysis(ctx, targetPhase, targetPlan, false)
+
+		if result.Error != nil {
+			return fmt.Errorf("analysis failed: %w", result.Error)
+		}
+
+		fmt.Println("Analysis complete.")
+		if result.PlansModified > 0 {
+			fmt.Printf("Modified %d subsequent plans.\n", result.PlansModified)
+		}
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(digestCmd)
+}

@@ -36,14 +36,22 @@ type MistralConfig struct {
 
 // BuildConfig contains build/execution settings
 type BuildConfig struct {
-	DefaultLoopIterations int           `mapstructure:"default_loop_iterations"`
-	Signals               SignalsConfig `mapstructure:"signals"`
+	DefaultLoopIterations int                `mapstructure:"default_loop_iterations"`
+	Signals               SignalsConfig      `mapstructure:"signals"`
+	Verification          VerificationConfig `mapstructure:"verification"`
 }
 
 // SignalsConfig contains completion signal patterns
 type SignalsConfig struct {
 	IterationComplete string `mapstructure:"iteration_complete"`
 	RalphComplete     string `mapstructure:"ralph_complete"`
+}
+
+// VerificationConfig contains project-specific build/test commands
+type VerificationConfig struct {
+	RequirePass   bool              `mapstructure:"require_pass"`
+	BuildCommands map[string]string `mapstructure:"build_commands"`
+	TestCommands  map[string]string `mapstructure:"test_commands"`
 }
 
 // Load reads the config from the workspace
@@ -97,6 +105,11 @@ func DefaultConfig() *Config {
 				IterationComplete: "###ITERATION_COMPLETE###",
 				RalphComplete:     "###RALPH_COMPLETE###",
 			},
+			Verification: VerificationConfig{
+				RequirePass:   true,
+				BuildCommands: make(map[string]string),
+				TestCommands:  make(map[string]string),
+			},
 		},
 	}
 }
@@ -127,5 +140,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Build.Signals.RalphComplete == "" {
 		cfg.Build.Signals.RalphComplete = defaults.Build.Signals.RalphComplete
+	}
+	// Verification defaults - RequirePass defaults to true if not explicitly set
+	if cfg.Build.Verification.BuildCommands == nil {
+		cfg.Build.Verification.BuildCommands = make(map[string]string)
+	}
+	if cfg.Build.Verification.TestCommands == nil {
+		cfg.Build.Verification.TestCommands = make(map[string]string)
 	}
 }

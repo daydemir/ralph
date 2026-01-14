@@ -137,6 +137,11 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 
 // Loop runs multiple plans until all complete or failure
 func (e *Executor) Loop(ctx context.Context, maxIterations int) error {
+	return e.LoopWithAnalysis(ctx, maxIterations, false)
+}
+
+// LoopWithAnalysis runs multiple plans with optional post-analysis
+func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skipAnalysis bool) error {
 	cyan := color.New(color.FgCyan).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
@@ -176,7 +181,16 @@ func (e *Executor) Loop(ctx context.Context, maxIterations int) error {
 			return result.Error
 		}
 
-		fmt.Printf("%s Complete (%s)\n\n", green("✓"), result.Duration.Round(time.Second))
+		fmt.Printf("%s Complete (%s)\n", green("✓"), result.Duration.Round(time.Second))
+
+		// Run post-analysis to check discoveries and update subsequent plans
+		analysisResult := e.RunPostAnalysis(ctx, phase, plan, skipAnalysis)
+		if analysisResult.Error != nil {
+			fmt.Printf("   Warning: post-analysis failed: %v\n", analysisResult.Error)
+		} else if analysisResult.DiscoveriesFound > 0 {
+			fmt.Printf("   Analyzed %d discoveries\n", analysisResult.DiscoveriesFound)
+		}
+		fmt.Println()
 	}
 
 	fmt.Printf("\nReached max iterations (%d). Run 'ralph run --loop' to continue.\n", maxIterations)
@@ -202,6 +216,7 @@ func (e *Executor) buildExecutionPrompt(planPath string) string {
    git commit -m "{type}({phase}-{plan}): {task_name}"
 6. After ALL tasks complete:
    - Run all checks in <verification> section
+   - Run build and test verification (see below)
    - Create SUMMARY.md in the phase directory
    - Signal: ###PLAN_COMPLETE###
 
@@ -209,14 +224,65 @@ func (e *Executor) buildExecutionPrompt(planPath string) string {
 
 After completing each task, add/update a ## Progress section at the end of the PLAN.md file:
 
-` + "```" + `markdown
+`+"```"+`markdown
 ## Progress
 - Task 1: [COMPLETE] - What was done, verification passed
 - Task 2: [IN_PROGRESS] - Current state, any blockers
 - Task 3: [PENDING]
-` + "```" + `
+`+"```"+`
 
 This ensures the next run can continue where you left off if context runs low.
+
+## Discovery Recording (MANDATORY)
+
+During execution, record ANY findings that don't fit the plan:
+- Tests that are stubs but marked as passing
+- APIs behaving differently than documented
+- Bugs found in existing code
+- Code that already exists (would have been duplicated)
+- Unexpected dependencies or side effects
+
+Add a ## Discoveries section to the PLAN.md file with XML-structured entries:
+
+`+"```"+`markdown
+## Discoveries
+
+<discovery type="TYPE" severity="SEVERITY">
+  <title>Brief title</title>
+  <detail>What you found and why it matters</detail>
+  <file>path/to/relevant/file.ts</file>
+  <action>ACTION</action>
+</discovery>
+`+"```"+`
+
+**Types:** bug, stub, api-issue, insight, blocker, technical-debt
+**Severity:** critical, high, medium, low, info
+**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, none
+
+Record discoveries AS YOU FIND THEM, not at the end. This ensures learnings survive context limits.
+
+## Build & Test Verification (MANDATORY)
+
+Before signaling ###PLAN_COMPLETE###, you MUST:
+
+1. Run ALL verification checks in the <verification> section
+2. Run project build commands:
+   - Look for build commands in CLAUDE.md, .ralph/config.yaml, or package.json/Makefile
+   - Common: npm run build, xcodebuild, go build, etc.
+3. Run project test suite:
+   - Look for test commands in CLAUDE.md, .ralph/config.yaml, or package.json
+   - Common: npm test, go test, xcodebuild test, etc.
+4. If ANY build or test fails that wasn't already failing before your changes:
+   - Fix the issue
+   - Re-run verification
+   - Only then signal completion
+
+You CANNOT signal ###PLAN_COMPLETE### if:
+- Build fails
+- New test failures introduced
+- Verification checks incomplete
+
+If builds/tests fail and you cannot fix them, signal ###BUILD_FAILED:{project}### or ###TEST_FAILED:{project}:{count}###
 
 ## Context Management (CRITICAL)
 
@@ -230,13 +296,16 @@ Ralph is monitoring your token usage and will terminate at 120K tokens as a safe
 
 **At ~100K tokens, proactively bail out:**
 1. Update the PLAN.md Progress section with current state
-2. Document what worked, what failed, and next steps
-3. Signal: ###BAILOUT:context_preservation###
+2. Update the ## Discoveries section with any findings
+3. Document what worked, what failed, and next steps
+4. Signal: ###BAILOUT:context_preservation###
 
-## Failure Signals
-- ###PLAN_COMPLETE### - All tasks done and verified
+## Signals
+- ###PLAN_COMPLETE### - All tasks done, verified, builds and tests pass
 - ###TASK_FAILED:{name}### - A task couldn't be completed
 - ###PLAN_FAILED:{check}### - Plan verification failed
+- ###BUILD_FAILED:{project}### - Build failed (e.g., ios, backend)
+- ###TEST_FAILED:{project}:{count}### - Tests failed that weren't failing before
 - ###BLOCKED:{reason}### - Need human intervention
 - ###BAILOUT:{reason}### - Preserving context, update Progress first
 
@@ -245,6 +314,7 @@ Ralph is monitoring your token usage and will terminate at 120K tokens as a safe
 - NO skipping verification
 - NO continuing after failure
 - ALWAYS update Progress section after each task
+- ALWAYS record discoveries as you find them
 - If uncertain, signal: ###BLOCKED:uncertain###
 - If burning context without progress, signal: ###BAILOUT:context_preservation###
 
