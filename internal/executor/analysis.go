@@ -189,28 +189,50 @@ func (e *Executor) buildAnalysisPrompt(plan *state.Plan, discoveries []Discovery
 
 Review each discovery and determine its impact on subsequent plans.
 
+### Discovery Types and Actions
+
+**High-impact types for plan restructuring:**
+- **assumption**: A decision was made without full information - check if subsequent plans rely on this assumption
+- **scope-creep**: Work was discovered that wasn't in any plan - note what new plans might be needed
+- **dependency**: An unexpected dependency was found - check if plan order needs adjustment
+- **questionable**: Suspicious code was found - add review notes to relevant plans
+
+**Standard types:**
+- **bug**, **stub**, **api-issue**: May need fixes before dependent plans proceed
+- **technical-debt**, **tooling-friction**, **env-discovery**: Document for future reference
+- **insight**, **blocker**: May affect how subsequent tasks are approached
+
+### Action Guidelines
+
 For discoveries with action "needs-fix", "needs-implementation", or "needs-plan":
 1. Read the relevant subsequent plan files
 2. Determine if the discovery:
    - Invalidates tasks in a plan (work is already done, or approach is wrong)
    - Means a dependency must be resolved first
    - Requires a new plan to be created
+   - Suggests plan order should change (dependency found)
 
 For discoveries with action "needs-documentation":
 1. Suggest updates to CLAUDE.md or project documentation
 2. Note which tooling friction or environment discoveries should be captured
 3. Add context to plans if the documentation affects their execution
 
+For discoveries with action "needs-investigation":
+1. Add investigation notes to relevant plans
+2. Flag assumptions that need verification before proceeding
+
 For each plan that needs updating:
 1. Add a note in the plan's <context> section referencing the discovery
 2. If a task is invalidated, add a note explaining why
 3. If a blocker exists, add a <blocker> tag at the top
+4. If plan order should change, note the recommended reordering
 
 ## Rules
 - Only modify subsequent plans if a discovery directly impacts them
 - Do NOT create new plan files - just note what would be needed
 - Do NOT modify the completed plan
 - Keep changes minimal and targeted
+- Flag critical assumptions and scope-creep for human review
 
 ## Completion
 When done analyzing, output a brief summary:

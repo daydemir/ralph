@@ -80,6 +80,7 @@ type ConsoleHandler struct {
 	tokenStats        TokenStats
 	tokenThreshold    int
 	planComplete      bool
+	bailoutSignal     *FailureSignal // Separate tracking for BAILOUT (soft failure)
 }
 
 func NewConsoleHandler() *ConsoleHandler {
@@ -139,7 +140,12 @@ func (h *ConsoleHandler) IsRalphComplete() bool {
 }
 
 func (h *ConsoleHandler) OnFailure(signal FailureSignal) {
-	h.failure = &signal
+	// BAILOUT is a soft signal for context preservation, not a hard failure
+	if signal.Type == "bailout" {
+		h.bailoutSignal = &signal
+	} else {
+		h.failure = &signal
+	}
 }
 
 func (h *ConsoleHandler) OnTokenUsage(usage TokenStats) {
@@ -169,6 +175,16 @@ func (h *ConsoleHandler) ShouldBailOut() bool {
 // IsPlanComplete returns true if ###PLAN_COMPLETE### was signaled
 func (h *ConsoleHandler) IsPlanComplete() bool {
 	return h.planComplete
+}
+
+// IsBailout returns true if ###BAILOUT### was signaled (soft failure for context preservation)
+func (h *ConsoleHandler) IsBailout() bool {
+	return h.bailoutSignal != nil
+}
+
+// GetBailout returns the bailout signal details
+func (h *ConsoleHandler) GetBailout() *FailureSignal {
+	return h.bailoutSignal
 }
 
 // ParseStream reads the Claude stream-json output and calls the handler

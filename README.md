@@ -353,6 +353,52 @@ Iteration 2/5: 01-02-PLAN.md
 ...
 ```
 
+## Post-Plan Analysis
+
+After each plan completes, Ralph runs an **analysis agent** that reviews discoveries and can adjust subsequent plans.
+
+### What It Does
+
+The analysis agent:
+- Reads `## Discoveries` section from the completed PLAN.md
+- Reviews all remaining plans in the current and future phases
+- Updates plans based on findings (adds context, blockers, notes)
+- Runs even on failures to help diagnose issues
+
+### Discovery Types
+
+During execution, Claude records discoveries in XML format:
+
+| Type | Description |
+|------|-------------|
+| `bug` | Existing bug found in codebase |
+| `stub` | Tests or code that are placeholders |
+| `api-issue` | External API behaving unexpectedly |
+| `insight` | Useful pattern or approach discovered |
+| `blocker` | Something preventing progress |
+| `technical-debt` | Code quality issue found |
+| `tooling-friction` | Build/test quirks learned through trial-and-error |
+| `assumption` | Decision made without full information |
+| `scope-creep` | Work discovered that wasn't in the plan |
+| `dependency` | Unexpected dependency between tasks |
+| `questionable` | Suspicious code or pattern worth reviewing |
+
+### When Analysis Runs
+
+The analysis agent runs:
+- After successful plan completion
+- After soft failures (context exhaustion, bailout with progress)
+- After hard failures (task/verification failure) - to diagnose issues
+
+### Skipping Analysis
+
+Use `--skip-analysis` to disable post-plan analysis:
+
+```bash
+ralph run --skip-analysis
+ralph run --loop 5 --skip-analysis
+```
+
 ## Configuration
 
 Edit `.ralph/config.yaml`:
