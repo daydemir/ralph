@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
@@ -69,9 +70,11 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 			return fmt.Errorf("cannot load phases: %w", err)
 		}
 
+		disp := display.New()
+
 		phase, plan := state.FindNextPlan(phases)
 		if plan == nil {
-			fmt.Println("All plans complete! No more work to do.")
+			disp.AllComplete()
 			fmt.Println("\nTo add more work:")
 			fmt.Println("  ralph add-phase \"New feature description\"")
 			fmt.Println("  ralph plan N")
@@ -105,9 +108,9 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 		// Run post-analysis to check observations and update subsequent plans
 		analysisResult := exec.RunPostAnalysis(ctx, phase, plan, runSkipAnalysis)
 		if analysisResult.Error != nil {
-			fmt.Printf("Warning: post-analysis failed: %v\n", analysisResult.Error)
+			disp.Warning(fmt.Sprintf("Post-analysis failed: %v", analysisResult.Error))
 		} else if analysisResult.ObservationsFound > 0 {
-			fmt.Printf("Analyzed %d observations\n", analysisResult.ObservationsFound)
+			disp.Info("Analysis", fmt.Sprintf("%d observations analyzed", analysisResult.ObservationsFound))
 		}
 
 		// Show what's next
@@ -115,10 +118,10 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 		phases, _ = state.LoadPhases(planningDir)
 		_, nextPlan := state.FindNextPlan(phases)
 		if nextPlan != nil {
-			fmt.Printf("Next: %s\n", nextPlan.Name)
+			disp.Info("Next", nextPlan.Name)
 			fmt.Println("Run 'ralph run' to continue, or 'ralph run --loop' for autonomous execution.")
 		} else {
-			fmt.Println("All plans in this phase complete!")
+			disp.Success("All plans in this phase complete!")
 			fmt.Println("Run 'ralph status' to see overall progress.")
 		}
 

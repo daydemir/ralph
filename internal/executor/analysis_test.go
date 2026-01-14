@@ -65,7 +65,7 @@ func TestParseObservationsXML(t *testing.T) {
 </observation>
 `
 
-	observations := ParseObservations(content)
+	observations := ParseObservations(content, nil)
 
 	if len(observations) != 1 {
 		t.Fatalf("Expected 1 observation, got %d", len(observations))

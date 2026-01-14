@@ -7,11 +7,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
+	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/llm"
 	"github.com/daydemir/ralph/internal/state"
-	"github.com/fatih/color"
 )
 
 // Observation represents a finding captured during plan execution
@@ -35,11 +34,9 @@ type AnalysisResult struct {
 // RunPostAnalysis spawns an agent to analyze observations and potentially update subsequent plans
 func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, skipAnalysis bool) *AnalysisResult {
 	result := &AnalysisResult{}
-	yellow := color.New(color.FgYellow).SprintFunc()
 
 	if skipAnalysis {
-		fmt.Printf("[%s] %s Skipped (--skip-analysis flag)\n",
-			time.Now().Format("15:04:05"), yellow("Analysis:"))
+		e.display.Info("Analysis", "Skipped (--skip-analysis flag)")
 		return result
 	}
 
@@ -50,7 +47,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 		return result
 	}
 
-	observations := ParseObservations(string(planContent))
+	observations := ParseObservations(string(planContent), e.display)
 
 	// Also check SUMMARY.md for prose-format observations
 	// The execution agent often writes observations there under "Auto-fixed Issues"
@@ -63,21 +60,16 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	result.ObservationsFound = len(observations)
 
 	if len(observations) == 0 {
-		fmt.Printf("[%s] %s No observations to analyze\n",
-			time.Now().Format("15:04:05"), yellow("Analysis:"))
+		e.display.Info("Analysis", "No observations to analyze")
 		return result
 	}
 
-	cyan := color.New(color.FgCyan).SprintFunc()
-
-	fmt.Printf("[%s] %s Found %d observations, running analysis...\n",
-		time.Now().Format("15:04:05"), cyan("Analysis:"), len(observations))
+	e.display.Info("Analysis", fmt.Sprintf("Found %d observations, running analysis...", len(observations)))
 
 	// Find subsequent plans in this phase and future phases
 	subsequentPlans := e.findSubsequentPlans(phase, plan)
 	if len(subsequentPlans) == 0 {
-		fmt.Printf("[%s] %s No subsequent plans to analyze\n",
-			time.Now().Format("15:04:05"), yellow("Analysis:"))
+		e.display.Info("Analysis", "No subsequent plans to analyze")
 		return result
 	}
 
@@ -106,7 +98,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	defer reader.Close()
 
 	// Parse the stream output (no termination callback - analysis should run to completion)
-	handler := llm.NewConsoleHandler()
+	handler := llm.NewConsoleHandlerWithDisplay(e.display)
 	if err := llm.ParseStream(reader, handler, nil); err != nil {
 		result.Error = fmt.Errorf("analysis stream parsing failed: %w", err)
 		return result
@@ -114,14 +106,12 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 
 	// Count modified plans by checking git status or similar
 	// For now, we trust the analysis agent updated what was needed
-	fmt.Printf("[%s] %s Analysis complete\n",
-		time.Now().Format("15:04:05"), cyan("Analysis:"))
+	e.display.Info("Analysis", "Analysis complete")
 
 	// Check if phase is complete and needs verification plan
 	created, err := e.MaybeCreateVerificationPlan(phase)
 	if err != nil {
-		fmt.Printf("[%s] %s Failed to create verification plan: %v\n",
-			time.Now().Format("15:04:05"), yellow("⚠"), err)
+		e.display.Warning(fmt.Sprintf("Failed to create verification plan: %v", err))
 	} else if created {
 		result.NewPlansCreated++
 	}
@@ -131,15 +121,13 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 
 // ParseObservations extracts observation blocks from PLAN.md content
 // Also supports legacy <discovery> tags for backward compatibility
-func ParseObservations(content string) []Observation {
-	yellow := color.New(color.FgYellow).SprintFunc()
-
+func ParseObservations(content string, disp *display.Display) []Observation {
 	// Check for prose observations that can't be parsed
 	prosePattern := regexp.MustCompile(`(?i)(##\s*Discovery:|##\s*Observation:|\*\*Discovery\*\*:|\*\*Finding\*\*:|\[Discovery)`)
 	if prosePattern.MatchString(content) {
-		fmt.Printf("[%s] %s Found prose observations - these cannot be parsed!\n",
-			time.Now().Format("15:04:05"), yellow("⚠ Warning:"))
-		fmt.Printf("           Use XML format: <observation type=\"...\">...</observation>\n")
+		if disp != nil {
+			disp.Warning("Found prose observations - these cannot be parsed! Use XML format.")
+		}
 	}
 
 	var observations []Observation
@@ -516,7 +504,7 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 			continue
 		}
 
-		observations := ParseObservations(string(content))
+		observations := ParseObservations(string(content), nil)
 		for _, o := range observations {
 			if o.Type == "checkpoint-automated" && o.Action == "needs-human-verify" {
 				verification := CheckpointVerification{
@@ -565,8 +553,6 @@ func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
 
 // MaybeCreateVerificationPlan checks if phase is complete and creates bundled verification plan
 func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error) {
-	cyan := color.New(color.FgCyan).SprintFunc()
-
 	// Check if verification plan already exists
 	verificationPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99-verification-PLAN.md", phase.Number))
 	if _, err := os.Stat(verificationPath); err == nil {
@@ -583,13 +569,11 @@ func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error)
 	verifications := e.CollectCheckpointObservations(phase)
 	if len(verifications) == 0 {
 		// No verifications needed
-		fmt.Printf("[%s] %s Phase complete with no pending verifications\n",
-			time.Now().Format("15:04:05"), cyan("Verification:"))
+		e.display.Info("Verification", "Phase complete with no pending verifications")
 		return false, nil
 	}
 
-	fmt.Printf("[%s] %s Found %d checkpoints requiring verification, creating plan...\n",
-		time.Now().Format("15:04:05"), cyan("Verification:"), len(verifications))
+	e.display.Info("Verification", fmt.Sprintf("Found %d checkpoints requiring verification, creating plan...", len(verifications)))
 
 	// Create the verification plan
 	err := e.createVerificationPlan(phase, verifications, verificationPath)
@@ -597,8 +581,7 @@ func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error)
 		return false, err
 	}
 
-	fmt.Printf("[%s] %s Created %s\n",
-		time.Now().Format("15:04:05"), cyan("Verification:"), filepath.Base(verificationPath))
+	e.display.Info("Verification", fmt.Sprintf("Created %s", filepath.Base(verificationPath)))
 
 	return true, nil
 }

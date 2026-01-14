@@ -3,13 +3,11 @@ package llm
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
-	"time"
 
-	"github.com/fatih/color"
+	"github.com/daydemir/ralph/internal/display"
 )
 
 // FailureSignal represents a detected failure in Claude's output
@@ -73,6 +71,7 @@ type UsageBlock struct {
 
 // ConsoleHandler implements OutputHandler for terminal output
 type ConsoleHandler struct {
+	display           *display.Display
 	toolCount         int
 	iterationComplete bool
 	ralphComplete     bool
@@ -85,6 +84,7 @@ type ConsoleHandler struct {
 
 func NewConsoleHandler() *ConsoleHandler {
 	return &ConsoleHandler{
+		display:        display.New(),
 		tokenThreshold: 120000, // 120K safety net
 	}
 }
@@ -92,7 +92,16 @@ func NewConsoleHandler() *ConsoleHandler {
 // NewConsoleHandlerWithThreshold creates a handler with custom token threshold
 func NewConsoleHandlerWithThreshold(threshold int) *ConsoleHandler {
 	return &ConsoleHandler{
+		display:        display.New(),
 		tokenThreshold: threshold,
+	}
+}
+
+// NewConsoleHandlerWithDisplay creates a handler with a shared display instance
+func NewConsoleHandlerWithDisplay(d *display.Display) *ConsoleHandler {
+	return &ConsoleHandler{
+		display:        d,
+		tokenThreshold: 120000,
 	}
 }
 
@@ -101,26 +110,18 @@ func (h *ConsoleHandler) OnToolUse(name string) {
 }
 
 func (h *ConsoleHandler) OnText(text string) {
-	timestamp := time.Now().Format("[15:04:05]")
-	truncated := truncateText(text, 400)
-
-	if h.toolCount > 0 {
-		fmt.Printf("%s [Tools: %d] %s\n", timestamp, h.toolCount, truncated)
-		h.toolCount = 0
-	} else {
-		fmt.Printf("%s %s\n", timestamp, truncated)
-	}
+	truncated := display.Truncate(text, 400)
+	h.display.Claude(truncated, h.toolCount)
+	h.toolCount = 0
 }
 
 func (h *ConsoleHandler) OnSelectedPRD(id string) {
-	cyan := color.New(color.FgCyan, color.Bold).SprintFunc()
-	fmt.Printf("\n%s\n\n", cyan(fmt.Sprintf(">>> WORKING ON: %s <<<", id)))
+	h.display.ClaudeWorkingOn(id)
 }
 
 func (h *ConsoleHandler) OnDone(result string) {
-	timestamp := time.Now().Format("[15:04:05]")
-	truncated := truncateText(result, 200)
-	fmt.Printf("%s [Done] %s\n", timestamp, truncated)
+	truncated := display.Truncate(result, 200)
+	h.display.ClaudeDone(truncated)
 }
 
 func (h *ConsoleHandler) OnIterationComplete() {
@@ -374,20 +375,7 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 	return scanner.Err()
 }
 
-func truncateText(s string, max int) string {
-	s = cleanText(s)
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
-}
-
+// cleanText wraps display.CleanText for internal use
 func cleanText(s string) string {
-	// Replace newlines with spaces for single-line output
-	s = strings.ReplaceAll(s, "\n", " ")
-	// Collapse multiple spaces
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	return strings.TrimSpace(s)
+	return display.CleanText(s)
 }

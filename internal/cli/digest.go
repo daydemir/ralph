@@ -100,7 +100,7 @@ Examples:
 		}
 
 		// Parse observations
-		observations := executor.ParseObservations(string(content))
+		observations := executor.ParseObservations(string(content), nil)
 
 		if len(observations) == 0 {
 			fmt.Println("No observations found in this plan.")

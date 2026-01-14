@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/llm"
 	"github.com/daydemir/ralph/internal/state"
-	"github.com/fatih/color"
 )
 
 // gsdWorkflowPath returns the path to the GSD execute-phase workflow
@@ -73,15 +73,17 @@ func DefaultConfig(workDir string) *Config {
 
 // Executor runs plans using Claude Code
 type Executor struct {
-	config *Config
-	claude *llm.Claude
+	config  *Config
+	claude  *llm.Claude
+	display *display.Display
 }
 
 // New creates a new executor
 func New(config *Config) *Executor {
 	return &Executor{
-		config: config,
-		claude: llm.NewClaude(config.ClaudeBinary),
+		config:  config,
+		claude:  llm.NewClaude(config.ClaudeBinary),
+		display: display.New(),
 	}
 }
 
@@ -102,12 +104,10 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		PlanPath: plan.Path,
 	}
 
-	cyan := color.New(color.FgCyan).SprintFunc()
-	green := color.New(color.FgGreen).SprintFunc()
-	red := color.New(color.FgRed).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
-
-	fmt.Printf("[%s] Executing: %s\n", time.Now().Format("15:04:05"), cyan(plan.Name))
+	// Show execution start in a Ralph box
+	e.display.RalphBox("RALPH",
+		fmt.Sprintf("Executing: %s", plan.Name),
+		fmt.Sprintf("Phase %d, Plan %d", phase.Number, plan.Number))
 
 	// Build the execution prompt
 	prompt := e.buildExecutionPrompt(plan.Path)
@@ -136,25 +136,26 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	reader, err := e.claude.Execute(execCtx, opts)
 	if err != nil {
 		result.Error = fmt.Errorf("execution failed: %w", err)
-		fmt.Printf("[%s] %s Execution failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
+		e.display.Error(fmt.Sprintf("Execution failed: %v", err))
 		result.Duration = time.Since(start)
 		return result
 	}
 	defer reader.Close()
 
 	// Parse the stream output, with termination callback for failure/bailout signals
-	handler := llm.NewConsoleHandler()
+	handler := llm.NewConsoleHandlerWithDisplay(e.display)
 	if err := llm.ParseStream(reader, handler, cancelExec); err != nil {
 		result.Error = fmt.Errorf("stream parsing failed: %w", err)
-		fmt.Printf("[%s] %s Stream parsing failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
+		e.display.Error(fmt.Sprintf("Stream parsing failed: %v", err))
 		result.Duration = time.Since(start)
 		return result
 	}
 
 	// Check for proper completion
 	tokenStats := handler.GetTokenStats()
-	fmt.Printf("[%s] Tokens used: %d (input: %d, output: %d)\n",
-		time.Now().Format("15:04:05"), tokenStats.TotalTokens, tokenStats.InputTokens, tokenStats.OutputTokens)
+
+	// Show completion status in a Ralph box
+	var statusLines []string
 
 	if handler.HasFailed() {
 		// Hard failure - task/plan/build/test failed
@@ -162,29 +163,32 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
 		result.TasksFailed = []string{failure.Detail}
 		result.FailureType = FailureHard
-		fmt.Printf("[%s] %s %s: %s\n", time.Now().Format("15:04:05"), red("✗"), failure.Type, failure.Detail)
+		statusLines = append(statusLines,
+			fmt.Sprintf("%s %s: %s", e.display.Theme().Error(display.SymbolError), failure.Type, failure.Detail))
 	} else if handler.IsPlanComplete() {
 		// Verify SUMMARY.md was created before marking success
 		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
 		if _, err := os.Stat(summaryPath); os.IsNotExist(err) {
 			result.Error = fmt.Errorf("plan signaled complete but SUMMARY.md not created: %s", summaryPath)
 			result.FailureType = FailureSoft
-			fmt.Printf("[%s] %s Plan signaled complete but SUMMARY.md missing\n", time.Now().Format("15:04:05"), yellow("⚠"))
+			statusLines = append(statusLines,
+				fmt.Sprintf("%s Plan signaled complete but SUMMARY.md missing", e.display.Theme().Warning(display.SymbolWarning)))
 		} else {
 			// Success - explicit completion signal with SUMMARY.md verified
 			result.Success = true
 			result.FailureType = FailureNone
-			fmt.Printf("[%s] %s Plan complete!\n", time.Now().Format("15:04:05"), green("✓"))
+			statusLines = append(statusLines,
+				fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
 
 			// Update STATE.md and ROADMAP.md with new progress
 			phases, _ := state.LoadPhases(e.config.PlanningDir)
 			if err := state.UpdateStateFile(e.config.PlanningDir, phases); err != nil {
-				fmt.Printf("[%s] %s Failed to update STATE.md: %v\n",
-					time.Now().Format("15:04:05"), yellow("⚠"), err)
+				statusLines = append(statusLines,
+					fmt.Sprintf("%s Failed to update STATE.md: %v", e.display.Theme().Warning(display.SymbolWarning), err))
 			}
 			if err := state.UpdateRoadmap(e.config.PlanningDir, phases); err != nil {
-				fmt.Printf("[%s] %s Failed to update ROADMAP.md: %v\n",
-					time.Now().Format("15:04:05"), yellow("⚠"), err)
+				statusLines = append(statusLines,
+					fmt.Sprintf("%s Failed to update ROADMAP.md: %v", e.display.Theme().Warning(display.SymbolWarning), err))
 			}
 
 			// Commit and push all repos
@@ -199,26 +203,37 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			// Soft success - work preserved, can resume
 			result.Success = false // Not fully complete, but progress saved
 			result.FailureType = FailureSoft
-			fmt.Printf("[%s] %s Bailout with progress preserved: %s\n", time.Now().Format("15:04:05"), cyan("↻"), bailout.Detail)
-			fmt.Println("   Progress section updated. Run 'ralph run' to continue.")
+			statusLines = append(statusLines,
+				fmt.Sprintf("%s Bailout with progress preserved: %s", e.display.Theme().Info(display.SymbolResume), bailout.Detail),
+				"   Progress section updated. Run 'ralph run' to continue.")
 		} else {
 			// Bailout without progress update - warn user
 			result.Error = fmt.Errorf("bailout without progress update: %s", bailout.Detail)
 			result.FailureType = FailureSoft
-			fmt.Printf("[%s] %s Bailout WITHOUT progress update: %s\n", time.Now().Format("15:04:05"), yellow("⚠"), bailout.Detail)
-			fmt.Println("   Warning: Progress section may not be updated. Check PLAN.md manually.")
+			statusLines = append(statusLines,
+				fmt.Sprintf("%s Bailout WITHOUT progress update: %s", e.display.Theme().Warning(display.SymbolWarning), bailout.Detail),
+				"   Warning: Progress section may not be updated. Check PLAN.md manually.")
 		}
 	} else if handler.ShouldBailOut() {
 		// Token limit reached - Ralph's safety net triggered
 		result.Error = fmt.Errorf("token limit reached: %d tokens", tokenStats.TotalTokens)
 		result.FailureType = FailureSoft
-		fmt.Printf("[%s] %s Token limit bailout at %d tokens\n", time.Now().Format("15:04:05"), yellow("⚠"), tokenStats.TotalTokens)
+		statusLines = append(statusLines,
+			fmt.Sprintf("%s Token limit bailout at %d tokens", e.display.Theme().Warning(display.SymbolWarning), tokenStats.TotalTokens))
 	} else {
 		// No signal at all - Claude exited without any completion/failure signal
 		result.FailureType = FailureSoft
-		fmt.Printf("[%s] %s Claude exited without completion signal\n", time.Now().Format("15:04:05"), yellow("⚠"))
-		fmt.Println("   Work may be complete. Continuing to next plan...")
+		statusLines = append(statusLines,
+			fmt.Sprintf("%s Claude exited without completion signal", e.display.Theme().Warning(display.SymbolWarning)),
+			"   Work may be complete. Continuing to next plan...")
 	}
+
+	// Add token stats and duration
+	statusLines = append(statusLines,
+		fmt.Sprintf("Tokens: %d (in: %d, out: %d)", tokenStats.TotalTokens, tokenStats.InputTokens, tokenStats.OutputTokens),
+		fmt.Sprintf("Duration: %s", time.Since(start).Round(time.Second)))
+
+	e.display.RalphBox("RALPH", statusLines...)
 
 	result.Duration = time.Since(start)
 	return result
@@ -231,14 +246,7 @@ func (e *Executor) Loop(ctx context.Context, maxIterations int) error {
 
 // LoopWithAnalysis runs multiple plans with optional post-analysis
 func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skipAnalysis bool) error {
-	cyan := color.New(color.FgCyan).SprintFunc()
-	green := color.New(color.FgGreen).SprintFunc()
-	red := color.New(color.FgRed).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
-	bold := color.New(color.Bold).SprintFunc()
-
-	fmt.Println(bold("=== Ralph Autonomous Loop ==="))
-	fmt.Println()
+	e.display.LoopHeader()
 
 	var lastPhaseNumber int = -1
 	var lastPlanPath string
@@ -254,7 +262,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		// Find next plan
 		phase, plan := state.FindNextPlan(phases)
 		if plan == nil {
-			fmt.Printf("\n%s All plans complete!\n", green("✓"))
+			e.display.AllComplete()
 			return nil
 		}
 
@@ -267,8 +275,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				return fmt.Errorf("stuck on plan %s - Progress section unchanged after execution", plan.Name)
 			}
 			// Progress section was updated = bailout recovery, allow continuation
-			fmt.Printf("[%s] %s Resuming %s (Progress updated, continuing)\n",
-				time.Now().Format("15:04:05"), cyan("↻"), plan.Name)
+			e.display.Resume(fmt.Sprintf("Resuming %s (Progress updated, continuing)", plan.Name))
 		}
 		lastPlanPath = plan.Path
 		lastProgressContent = extractProgressSection(plan.Path)
@@ -278,8 +285,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 			lastPhaseNumber = phase.Number
 			created, err := e.MaybeCreateDecisionsPlan(phase)
 			if err != nil {
-				fmt.Printf("[%s] %s Failed to create decisions plan: %v\n",
-					time.Now().Format("15:04:05"), yellow("⚠"), err)
+				e.display.Warning(fmt.Sprintf("Failed to create decisions plan: %v", err))
 			} else if created {
 				// Decisions plan was created - reload phases and find next plan again
 				phases, err = state.LoadPhases(e.config.PlanningDir)
@@ -288,15 +294,14 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				}
 				phase, plan = state.FindNextPlan(phases)
 				if plan == nil {
-					fmt.Printf("\n%s All plans complete!\n", green("✓"))
+					e.display.AllComplete()
 					return nil
 				}
 			}
 		}
 
 		total, completed := state.CountPlans(phases)
-		fmt.Printf("Iteration %d/%d: %s (%d/%d plans done)\n",
-			i, maxIterations, cyan(plan.Name), completed, total)
+		e.display.Iteration(i, maxIterations, plan.Name, completed, total)
 
 		// Execute the plan
 		result := e.ExecutePlan(ctx, phase, plan)
@@ -304,36 +309,31 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		// Run post-analysis ALWAYS - even on hard failures - to diagnose issues and update plans
 		analysisResult := e.RunPostAnalysis(ctx, phase, plan, skipAnalysis)
 		if analysisResult.Error != nil {
-			fmt.Printf("   Warning: post-analysis failed: %v\n", analysisResult.Error)
+			e.display.Warning(fmt.Sprintf("Post-analysis failed: %v", analysisResult.Error))
 		} else if analysisResult.ObservationsFound > 0 {
-			fmt.Printf("   Analyzed %d discoveries\n", analysisResult.ObservationsFound)
+			e.display.Info("Analysis", fmt.Sprintf("%d observations analyzed", analysisResult.ObservationsFound))
 		}
 
 		if !result.Success {
 			if result.FailureType == FailureHard {
 				// Hard failure - stop the loop (analysis already ran above)
-				fmt.Printf("\n%s FAILED: %s\n", red("✗"), plan.Name)
-				if result.Error != nil {
-					fmt.Printf("   Error: %v\n", result.Error)
-				}
-				fmt.Printf("\nStopping loop. %d plans complete, 1 failed.\n", completed)
-				fmt.Println("Run 'ralph status' for details.")
+				e.display.LoopFailed(plan.Name, result.Error, completed)
 				return result.Error
 			}
 			// Soft failure - warn but continue to next plan
-			fmt.Printf("\n%s %s (soft failure, continuing to next plan)\n", yellow("⚠"), plan.Name)
+			e.display.Warning(fmt.Sprintf("%s (soft failure, continuing to next plan)", plan.Name))
 			if result.Error != nil {
 				fmt.Printf("   Warning: %v\n", result.Error)
 			}
 			fmt.Println()
 		} else {
 			// Only print checkmark on actual success
-			fmt.Printf("%s Complete (%s)\n", green("✓"), result.Duration.Round(time.Second))
+			e.display.Success(fmt.Sprintf("Complete (%s)", result.Duration.Round(time.Second)))
 			fmt.Println()
 		}
 	}
 
-	fmt.Printf("\nReached max iterations (%d). Run 'ralph run --loop' to continue.\n", maxIterations)
+	e.display.MaxIterations(maxIterations)
 	return nil
 }
 
@@ -342,9 +342,7 @@ func (e *Executor) buildExecutionPrompt(planPath string) string {
 	gsdBase, err := loadGSDWorkflow()
 	if err != nil {
 		// Log warning and use fallback
-		yellow := color.New(color.FgYellow).SprintFunc()
-		fmt.Fprintf(os.Stderr, "[%s] %s GSD workflow not available: %v (using fallback)\n",
-			time.Now().Format("15:04:05"), yellow("⚠"), err)
+		e.display.Warning(fmt.Sprintf("GSD workflow not available: %v (using fallback)", err))
 		return e.buildFallbackExecutionPrompt(planPath)
 	}
 
@@ -877,8 +875,6 @@ type DecisionCheckpoint struct {
 
 // MaybeCreateDecisionsPlan scans a phase for checkpoint:decision tasks and creates a bundled decisions plan
 func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
-	cyan := color.New(color.FgCyan).SprintFunc()
-
 	// Check if decisions plan already exists
 	decisionsPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-00-decisions-PLAN.md", phase.Number))
 	if _, err := os.Stat(decisionsPath); err == nil {
@@ -914,8 +910,7 @@ func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
 		return false, nil
 	}
 
-	fmt.Printf("[%s] %s Found %d decision checkpoints, creating decisions plan...\n",
-		time.Now().Format("15:04:05"), cyan("Decisions:"), len(decisions))
+	e.display.Info("Decisions", fmt.Sprintf("Found %d checkpoints, creating decisions plan...", len(decisions)))
 
 	// Create the decisions plan
 	err := e.createDecisionsPlan(phase, decisions, decisionsPath)
@@ -923,8 +918,7 @@ func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
 		return false, err
 	}
 
-	fmt.Printf("[%s] %s Created %s\n",
-		time.Now().Format("15:04:05"), cyan("Decisions:"), filepath.Base(decisionsPath))
+	e.display.Info("Decisions", fmt.Sprintf("Created %s", filepath.Base(decisionsPath)))
 
 	return true, nil
 }
@@ -1014,10 +1008,6 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		}
 	}
 
-	cyan := color.New(color.FgCyan).SprintFunc()
-	green := color.New(color.FgGreen).SprintFunc()
-	yellow := color.New(color.FgYellow).SprintFunc()
-
 	for _, repo := range repos {
 		// Check if there are changes to commit
 		statusCmd := exec.Command("git", "-C", repo, "status", "--porcelain")
@@ -1027,14 +1017,12 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		}
 
 		repoName := filepath.Base(repo)
-		fmt.Printf("[%s] %s Committing changes in %s\n",
-			time.Now().Format("15:04:05"), cyan("Git:"), repoName)
+		e.display.Info("Git", fmt.Sprintf("Committing changes in %s", repoName))
 
 		// Stage all changes
 		addCmd := exec.Command("git", "-C", repo, "add", "-A")
 		if err := addCmd.Run(); err != nil {
-			fmt.Printf("[%s] %s Failed to stage in %s: %v\n",
-				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			e.display.Warning(fmt.Sprintf("Failed to stage in %s: %v", repoName, err))
 			continue
 		}
 
@@ -1042,21 +1030,18 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		commitMsg := fmt.Sprintf("chore(%s): auto-commit after plan completion", planId)
 		commitCmd := exec.Command("git", "-C", repo, "commit", "-m", commitMsg)
 		if err := commitCmd.Run(); err != nil {
-			fmt.Printf("[%s] %s Failed to commit in %s: %v\n",
-				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			e.display.Warning(fmt.Sprintf("Failed to commit in %s: %v", repoName, err))
 			continue
 		}
 
 		// Push to current branch
 		pushCmd := exec.Command("git", "-C", repo, "push")
 		if err := pushCmd.Run(); err != nil {
-			fmt.Printf("[%s] %s Failed to push %s: %v\n",
-				time.Now().Format("15:04:05"), yellow("⚠"), repoName, err)
+			e.display.Warning(fmt.Sprintf("Failed to push %s: %v", repoName, err))
 			continue
 		}
 
-		fmt.Printf("[%s] %s Pushed %s\n",
-			time.Now().Format("15:04:05"), green("✓"), repoName)
+		e.display.Success(fmt.Sprintf("Pushed %s", repoName))
 	}
 
 	return nil
