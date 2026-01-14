@@ -20,8 +20,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.buildTime={{.Date}}
+      - -X github.com/daydemir/ralph/internal/cli.Version={{.Version}}
 
 archives:
   - format: tar.gz

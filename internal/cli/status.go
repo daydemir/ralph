@@ -80,7 +80,7 @@ Use --verbose for detailed information including decisions and issues.`,
 		bold := color.New(color.Bold).SprintFunc()
 		dim := color.New(color.FgHiBlack).SprintFunc()
 
-		fmt.Printf("%s\n%s\n\n", bold(st.ProjectName), dim(fmt.Sprintf("ralph v%s", version)))
+		fmt.Printf("%s\n%s\n\n", bold(st.ProjectName), dim(fmt.Sprintf("ralph v%s", Version)))
 
 		// Project artifacts
 		printArtifacts(gsd, phases, green, dim)

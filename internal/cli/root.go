@@ -8,7 +8,8 @@ import (
 )
 
 var (
-	version = "0.4.0-alpha.4"
+	// Version is set by goreleaser via ldflags
+	Version = "dev"
 	cfgFile string
 )
 
@@ -42,7 +43,7 @@ Workflow:
   4. ralph plan 1            # Create plans for Phase 1
   5. ralph run               # Execute plans
   6. ralph run --loop 5      # Autonomous execution`,
-	Version: version,
+	Version: Version,
 }
 
 func Execute() error {
@@ -51,7 +52,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is .planning/config.json)")
-	rootCmd.SetVersionTemplate(fmt.Sprintf("ralph version %s\n", version))
+	rootCmd.SetVersionTemplate(fmt.Sprintf("ralph version %s\n", Version))
 }
 
 func exitError(msg string) {
