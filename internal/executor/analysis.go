@@ -51,6 +51,15 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	}
 
 	observations := ParseObservations(string(planContent))
+
+	// Also check SUMMARY.md for prose-format observations
+	// The execution agent often writes observations there under "Auto-fixed Issues"
+	summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+	if summaryContent, err := os.ReadFile(summaryPath); err == nil {
+		summaryObs := ParseSummaryObservations(string(summaryContent))
+		observations = append(observations, summaryObs...)
+	}
+
 	result.ObservationsFound = len(observations)
 
 	if len(observations) == 0 {
@@ -156,6 +165,98 @@ func ParseObservations(content string) []Observation {
 			}
 			observations = append(observations, o)
 		}
+	}
+
+	return observations
+}
+
+// ParseSummaryObservations extracts observations from SUMMARY.md prose format
+// Looks for patterns in "Auto-fixed Issues" and "Issues Encountered" sections
+// Format: **N. [Rule X - TYPE] TITLE** followed by bullet points with details
+func ParseSummaryObservations(content string) []Observation {
+	var observations []Observation
+
+	// Pattern for auto-fixed issues: **N. [Rule X - TYPE] TITLE**
+	// Example: **1. [Rule 1 - Bug] iOS 18 availability required for SpatialAudioComponent**
+	issuePattern := regexp.MustCompile(`(?m)\*\*\d+\.\s*\[Rule\s+\d+\s*-\s*([^\]]+)\]\s*([^\*]+)\*\*`)
+
+	// Find all matches
+	matches := issuePattern.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+
+		obsType := strings.ToLower(strings.TrimSpace(match[1]))
+		title := strings.TrimSpace(match[2])
+
+		// Find the position of this match to extract following bullet points
+		matchPos := strings.Index(content, match[0])
+		if matchPos == -1 {
+			continue
+		}
+
+		// Extract the block after the title (until next ## or **N. pattern)
+		blockStart := matchPos + len(match[0])
+		blockEnd := len(content)
+
+		// Find next section boundary
+		nextSection := regexp.MustCompile(`(?m)^(##|\*\*\d+\.)`)
+		if loc := nextSection.FindStringIndex(content[blockStart:]); loc != nil {
+			blockEnd = blockStart + loc[0]
+		}
+
+		block := content[blockStart:blockEnd]
+
+		// Extract details from bullet points
+		var detail, file string
+
+		// Issue line
+		if issueMatch := regexp.MustCompile(`(?m)-\s*\*\*Issue:\*\*\s*(.+)`).FindStringSubmatch(block); len(issueMatch) > 1 {
+			detail = strings.TrimSpace(issueMatch[1])
+		}
+
+		// Fix line (append to detail)
+		if fixMatch := regexp.MustCompile(`(?m)-\s*\*\*Fix:\*\*\s*(.+)`).FindStringSubmatch(block); len(fixMatch) > 1 {
+			if detail != "" {
+				detail += " | Fix: " + strings.TrimSpace(fixMatch[1])
+			} else {
+				detail = "Fix: " + strings.TrimSpace(fixMatch[1])
+			}
+		}
+
+		// Files modified
+		if fileMatch := regexp.MustCompile(`(?m)-\s*\*\*Files modified:\*\*\s*` + "`?" + `([^` + "`" + `\n]+)` + "`?").FindStringSubmatch(block); len(fileMatch) > 1 {
+			file = strings.TrimSpace(fileMatch[1])
+		}
+
+		// Determine action based on context
+		action := "none" // Auto-fixed issues are already resolved
+		if strings.Contains(strings.ToLower(block), "pending") || strings.Contains(strings.ToLower(block), "blocker") {
+			action = "needs-fix"
+		}
+
+		// Map type strings to standard types
+		switch obsType {
+		case "bug":
+			obsType = "bug"
+		case "code fix", "code-fix":
+			obsType = "bug"
+		default:
+			// Keep as-is or default to insight
+			if obsType == "" {
+				obsType = "insight"
+			}
+		}
+
+		observations = append(observations, Observation{
+			Type:     obsType,
+			Severity: "medium", // Auto-fixed issues are typically medium
+			Title:    title,
+			Detail:   detail,
+			File:     file,
+			Action:   action,
+		})
 	}
 
 	return observations
