@@ -28,3 +28,4 @@ Thumbs.db
 # Build output
 dist/
 homebrew-tap/
+docs/remaining-improvements-plan.*
