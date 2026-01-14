@@ -284,8 +284,8 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		analysisResult := e.RunPostAnalysis(ctx, phase, plan, skipAnalysis)
 		if analysisResult.Error != nil {
 			fmt.Printf("   Warning: post-analysis failed: %v\n", analysisResult.Error)
-		} else if analysisResult.DiscoveriesFound > 0 {
-			fmt.Printf("   Analyzed %d discoveries\n", analysisResult.DiscoveriesFound)
+		} else if analysisResult.ObservationsFound > 0 {
+			fmt.Printf("   Analyzed %d discoveries\n", analysisResult.ObservationsFound)
 		}
 
 		if !result.Success {
@@ -342,77 +342,104 @@ The following are Ralph-specific extensions to the GSD execution workflow.
 ### Plan Location
 %s
 
-### Extended Discovery Types (Ralph-specific)
+### Observation Types (Ralph-specific)
 
-In addition to the standard discovery types, Ralph recognizes:
-- **assumption**: Decision made without full information (IMPORTANT for analysis agent)
-- **scope-creep**: Work discovered that wasn't in the plan (IMPORTANT for analysis agent)
-- **dependency**: Unexpected dependency between tasks/plans (IMPORTANT for analysis agent)
-- **questionable**: Suspicious code or pattern worth reviewing (IMPORTANT for analysis agent)
-- **already-complete**: Work in this task was already done before execution (IMPORTANT for analysis agent)
+Ralph's analysis agent parses observations to improve subsequent plans. Types:
+- **bug**: Bug found that needs fixing
+- **stub**: Stub/placeholder code that needs implementation
+- **api-issue**: External API problem or inconsistency
+- **insight**: Useful information for future plans
+- **blocker**: Something blocking progress
+- **technical-debt**: Code that works but needs improvement
+- **assumption**: Decision made without full information
+- **scope-creep**: Work discovered that wasn't in the plan
+- **dependency**: Unexpected dependency between tasks/plans
+- **questionable**: Suspicious code or pattern worth reviewing
+- **already-complete**: Work was already done before execution
+- **checkpoint-automated**: Checkpoint verification that was automated
+- **tooling-friction**: Tool/environment issue that slowed progress
 
-These types are critical for Ralph's post-execution analysis agent, which may reorder plans, create new plans, or skip completed work based on these discoveries.
+### Observation Format (CRITICAL - Analyzer Cannot Parse Prose)
+
+**IMPORTANT**: Prose observations like "## Discovery: ..." or "**Finding:** ..." CANNOT be parsed.
+You MUST use this exact XML format:
+
+` + "```" + `xml
+<observation type="TYPE" severity="SEVERITY">
+  <title>Short descriptive title</title>
+  <detail>What you found and why it matters</detail>
+  <file>path/to/relevant/file</file>
+  <action>ACTION</action>
+</observation>
+` + "```" + `
+
+**Severities**: critical, high, medium, low, info
+**Actions**: needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+
+### What to Observe (LOW BAR - Record Everything)
+
+Record routine findings. Examples:
+- "3 tests in X are stubs" → type="stub", action="needs-implementation"
+- "File Y has no tests" → type="insight", action="needs-plan"
+- "Function Z is deprecated but used in 5 places" → type="technical-debt", action="needs-fix"
+- "This took 30 min because docs were wrong" → type="tooling-friction", action="needs-documentation"
+- "Tests already exist for X" → type="already-complete", action="none"
+- "Found TODO comment in code" → type="stub", action="needs-implementation"
+- "API returns different format than docs say" → type="api-issue", action="needs-investigation"
+
+**The analysis agent needs DATA to work with. Under-reporting = no analysis happens.**
+
+### Recording Observations (Use Subagents to Save Context)
+
+Recording observations inline burns your main context. Use Task tool to delegate:
+
+` + "```" + `
+Task(subagent_type="general-purpose", prompt="
+  Add this observation to PLAN.md in the Observations section:
+  <observation type=\"stub\" severity=\"medium\">
+    <title>3 backend tests are stubs</title>
+    <detail>image.test.ts and video.test.ts have stub tests</detail>
+    <file>mix-backend/functions/src/__tests__/endpoints/</file>
+    <action>needs-implementation</action>
+  </observation>
+")
+` + "```" + `
+
+Record observations AS YOU GO - don't batch them at the end.
 
 ### Post-Execution Analysis
 
-After you complete (or fail), Ralph will automatically spawn an analysis agent to:
-1. Parse all discoveries from this execution
+After you complete (or fail), Ralph spawns an analysis agent to:
+1. Parse all observations from this execution
 2. Review subsequent plans for impact
-3. Potentially restructure the plan sequence based on findings
+3. Potentially restructure plans (reorder, create new, skip completed)
 
-To maximize analysis effectiveness:
-- Record discoveries AS YOU FIND THEM (not at the end)
+To maximize effectiveness:
+- Record observations AS YOU FIND THEM
 - Be specific about dependencies discovered
 - Flag assumptions that might affect future plans
-- Note any work that was already complete (to avoid duplication)
-
-### Discovery Philosophy: OVER-REPORT
-
-**When in doubt, record it.** It's better to log 10 minor observations than miss 1 important insight.
-
-Record discoveries for:
-- Anything that surprised you (even slightly)
-- Decisions you made without explicit guidance
-- Patterns you noticed in the codebase
-- Things that took longer than expected (why?)
-- Things that were easier than expected (why?)
-- Workarounds you used
-- Commands/syntax you figured out through trial-and-error
-- Files you found that weren't mentioned in the plan
-- Assumptions you made about how something works
-
-The analysis agent uses discoveries to improve subsequent plans. Under-reporting means lost learning. Over-reporting is cheap - just record it.
 
 ### Pre-Existing Work Handling (IMPORTANT)
 
-When you discover that work in a task is ALREADY COMPLETE (files exist, code already implemented):
+When you find that work in a task is ALREADY COMPLETE (files exist, code already implemented):
 
-1. **Record a discovery:**
-   ` + "```" + `markdown
-   <discovery type="already-complete" severity="info">
+1. **Record an observation:**
+   ` + "```" + `xml
+   <observation type="already-complete" severity="info">
      <title>Task N already implemented</title>
-     <detail>The [what] already exists at [path]. Likely done in previous session or by another plan.</detail>
+     <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
      <file>path/to/existing/file</file>
      <action>none</action>
-   </discovery>
+   </observation>
    ` + "```" + `
 
-2. **Update Progress section:**
-   - Mark the task as ` + "`[ALREADY_COMPLETE]`" + ` (not ` + "`[COMPLETE]`" + `)
-   - Note when/where it was likely done if easily determinable
+2. **Update Progress section:** Mark task as ` + "`[ALREADY_COMPLETE]`" + `
 
-3. **Verify existing work meets requirements:**
-   - Check that the pre-existing implementation satisfies the task's <done> criteria
-   - If it doesn't fully meet requirements, treat it as a partial implementation and complete it
+3. **Verify existing work meets requirements** - if partial, complete it
 
-4. **Continue with remaining tasks and completion:**
-   - Create SUMMARY.md documenting what was found
-   - Signal ###PLAN_COMPLETE### as normal
+4. **Continue normally:** Create SUMMARY.md, signal ###PLAN_COMPLETE###
 
-**DO NOT** get stuck investigating the history of pre-existing work.
-**DO NOT** exit without signaling completion.
-
-The goal is to document what exists and move forward, not to forensically analyze when it was created.
+**DO NOT** get stuck investigating history. Document what exists and move forward.
 
 ### Background Task Verification (MANDATORY)
 
@@ -458,13 +485,13 @@ Ralph monitors your token usage and will terminate at 120K tokens as a safety ne
 - File reading volume: if you've read > 20 files without progress, context is bloated
 
 **Use subagents for writing to save context:**
-- Use Task tool (subagent_type="general-purpose") for recording discoveries and progress updates
-- Prompt: "Update PLAN.md with discoveries: [list what you found]. Update Progress section: [current state]"
+- Use Task tool (subagent_type="general-purpose") for recording observations and progress updates
+- Prompt: "Update PLAN.md with observations: [list what you found]. Update Progress section: [current state]"
 - This offloads file editing work to a fresh subagent context, preserving your main context for execution
 
 **At ~100K tokens, proactively bail out:**
 1. Update the PLAN.md Progress section with current state
-2. Update the ## Discoveries section with any findings
+2. Update the ## Observations section with any findings
 3. Document what worked, what failed, and next steps
 4. Signal: ###BAILOUT:context_preservation###
 
@@ -508,123 +535,69 @@ After completing each task, add/update a ## Progress section at the end of the P
 
 This ensures the next run can continue where you left off if context runs low.
 
-## Discovery Recording (MANDATORY - OVER-REPORT)
+## Observation Recording (MANDATORY - LOW BAR)
 
-**Philosophy: When in doubt, record it.**
+**CRITICAL: The analyzer CANNOT parse prose. You MUST use XML format.**
 
-Record discoveries LIBERALLY. It's far better to log 10 minor observations than miss 1 important insight. The analysis agent filters what matters - your job is to capture everything.
+Record observations LIBERALLY. Low-bar examples:
+- "3 tests are stubs" → type="stub"
+- "File X has no tests" → type="insight"
+- "Function Y deprecated but still used" → type="technical-debt"
+- "Took 30 min because docs wrong" → type="tooling-friction"
 
-Record ANY of these during execution:
-- Tests that are stubs but marked as passing
-- APIs behaving differently than documented
-- Bugs found in existing code
-- Code that already exists (would have been duplicated)
-- Unexpected dependencies or side effects
-- Assumptions you made without full information
-- Work discovered that wasn't anticipated in the plan (scope creep)
-- Suspicious code or patterns worth reviewing
-- Decisions that future plans might need to know about
+Add a ## Observations section to PLAN.md with XML entries:
 
-Add a ## Discoveries section to the PLAN.md file with XML-structured entries:
-
-`+"```"+`markdown
-## Discoveries
-
-<discovery type="TYPE" severity="SEVERITY">
+`+"```"+`xml
+<observation type="TYPE" severity="SEVERITY">
   <title>Brief title</title>
   <detail>What you found and why it matters</detail>
   <file>path/to/relevant/file.ts</file>
   <action>ACTION</action>
-</discovery>
+</observation>
 `+"```"+`
 
-**Types:**
-- bug: Existing bug found in codebase
-- stub: Tests or code that are placeholders
-- api-issue: External API behaving unexpectedly
-- insight: Useful pattern or approach discovered
-- blocker: Something preventing progress
-- technical-debt: Code quality issue found
-- tooling-friction: Build/test quirks learned through trial-and-error
-- env-discovery: Environment setup learned
-- assumption: Decision made without full information (IMPORTANT for analysis)
-- scope-creep: Work discovered that wasn't in the plan (IMPORTANT for analysis)
-- dependency: Unexpected dependency between tasks/plans (IMPORTANT for analysis)
-- questionable: Suspicious code or pattern worth reviewing (IMPORTANT for analysis)
-- already-complete: Work in this task was already done before execution (IMPORTANT for analysis)
+**Types:** bug, stub, api-issue, insight, blocker, technical-debt, tooling-friction, env-discovery, assumption, scope-creep, dependency, questionable, already-complete, checkpoint-automated
 
 **Severity:** critical, high, medium, low, info
-**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, none
+**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
 
-**Important for analysis agent:** The types marked "IMPORTANT" help the analysis agent decide if subsequent plans need updating, reordering, or if new plans should be created.
-
-**Tooling friction examples** (things discovered through trial-and-error):
-- Correct command syntax (e.g., "Test target is 'Unit Tests iOS' not 'Tests iOS'")
-- File locations found after searching
-- Build/test quirks (e.g., "Must use -destination 'generic/platform=iOS Simulator'")
-
-Example discoveries:
-<discovery type="tooling-friction" severity="info">
+Example observations:
+<observation type="tooling-friction" severity="info">
   <title>Xcode test target naming</title>
   <detail>Test target is "Unit Tests iOS", not "Tests iOS". Found via xcodebuild -list</detail>
   <file>ar/AR/AR.xcodeproj</file>
   <action>needs-documentation</action>
-</discovery>
+</observation>
 
-<discovery type="assumption" severity="medium">
-  <title>Assumed auth endpoint returns user ID</title>
-  <detail>Plan says "get user from auth" but doesn't specify format. Assumed response includes userId field.</detail>
-  <file>src/services/auth.ts</file>
-  <action>needs-investigation</action>
-</discovery>
-
-<discovery type="scope-creep" severity="high">
+<observation type="scope-creep" severity="high">
   <title>Need to update 3 additional files</title>
   <detail>The auth change requires updating UserService, ProfileView, and SettingsView which weren't in the plan.</detail>
   <action>needs-plan</action>
-</discovery>
+</observation>
 
-**Also record (things people often skip but shouldn't):**
-- Commands/syntax figured out through trial-and-error
-- Files you found that weren't mentioned in the plan
-- Anything that surprised you (even slightly)
-- Decisions you made without explicit guidance
-- Patterns you noticed in the codebase
-- Why something took longer or shorter than expected
-- Workarounds you used
-
-Record discoveries AS YOU FIND THEM, not at the end. The analysis agent uses discoveries to improve subsequent plans. Under-reporting = lost learning. Over-reporting is cheap.
+Record observations AS YOU GO - don't batch at end. Under-reporting = no analysis happens.
 
 ## Pre-Existing Work Handling (IMPORTANT)
 
-When you discover that work in a task is ALREADY COMPLETE (files exist, code already implemented):
+When you find work is ALREADY COMPLETE:
 
-1. **Record a discovery:**
-   ` + "```" + `markdown
-   <discovery type="already-complete" severity="info">
+1. **Record an observation:**
+   ` + "```" + `xml
+   <observation type="already-complete" severity="info">
      <title>Task N already implemented</title>
-     <detail>The [what] already exists at [path]. Likely done in previous session or by another plan.</detail>
+     <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
      <file>path/to/existing/file</file>
      <action>none</action>
-   </discovery>
+   </observation>
    ` + "```" + `
 
-2. **Update Progress section:**
-   - Mark the task as ` + "`[ALREADY_COMPLETE]`" + ` (not ` + "`[COMPLETE]`" + `)
-   - Note when/where it was likely done if easily determinable
+2. **Update Progress section:** Mark task as ` + "`[ALREADY_COMPLETE]`" + `
 
-3. **Verify existing work meets requirements:**
-   - Check that the pre-existing implementation satisfies the task's <done> criteria
-   - If it doesn't fully meet requirements, treat it as a partial implementation and complete it
+3. **Verify existing work meets requirements** - if partial, complete it
 
-4. **Continue with remaining tasks and completion:**
-   - Create SUMMARY.md documenting what was found
-   - Signal ###PLAN_COMPLETE### as normal
+4. **Continue normally:** Create SUMMARY.md, signal ###PLAN_COMPLETE###
 
-**DO NOT** get stuck investigating the history of pre-existing work.
-**DO NOT** exit without signaling completion.
-
-The goal is to document what exists and move forward, not to forensically analyze when it was created.
+**DO NOT** get stuck investigating history. Document what exists and move forward.
 
 ## Build & Test Verification (MANDATORY)
 
@@ -687,13 +660,13 @@ Ralph is monitoring your token usage and will terminate at 120K tokens as a safe
 - File reading volume: if you've read > 20 files without progress, context is bloated
 
 **Use subagents for writing to save context:**
-- Use Task tool (subagent_type="general-purpose") for recording discoveries and progress updates
-- Prompt: "Update PLAN.md with discoveries: [list what you found]. Update Progress section: [current state]"
+- Use Task tool (subagent_type="general-purpose") for recording observations and progress updates
+- Prompt: "Update PLAN.md with observations: [list what you found]. Update Progress section: [current state]"
 - This offloads file editing work to a fresh subagent context, preserving your main context for execution
 
 **At ~100K tokens, proactively bail out:**
 1. Update the PLAN.md Progress section with current state
-2. Update the ## Discoveries section with any findings
+2. Update the ## Observations section with any findings
 3. Document what worked, what failed, and next steps
 4. Signal: ###BAILOUT:context_preservation###
 
@@ -711,7 +684,7 @@ Ralph is monitoring your token usage and will terminate at 120K tokens as a safe
 - NO skipping verification
 - NO continuing after failure
 - ALWAYS update Progress section after each task
-- ALWAYS record discoveries as you find them
+- ALWAYS record observations in XML format as you find them
 - If uncertain, signal: ###BLOCKED:uncertain###
 - If burning context without progress, signal: ###BAILOUT:context_preservation###
 

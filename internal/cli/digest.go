@@ -99,27 +99,27 @@ Examples:
 			return fmt.Errorf("cannot read plan: %w", err)
 		}
 
-		// Parse discoveries
-		discoveries := executor.ParseDiscoveries(string(content))
+		// Parse observations
+		observations := executor.ParseObservations(string(content))
 
-		if len(discoveries) == 0 {
-			fmt.Println("No discoveries found in this plan.")
+		if len(observations) == 0 {
+			fmt.Println("No observations found in this plan.")
 			return nil
 		}
 
-		fmt.Printf("Found %d discoveries:\n\n", len(discoveries))
-		for i, d := range discoveries {
-			fmt.Printf("%d. [%s/%s] %s\n", i+1, d.Type, d.Severity, d.Title)
-			fmt.Printf("   %s\n", d.Detail)
-			if d.File != "" {
-				fmt.Printf("   File: %s\n", d.File)
+		fmt.Printf("Found %d observations:\n\n", len(observations))
+		for i, o := range observations {
+			fmt.Printf("%d. [%s/%s] %s\n", i+1, o.Type, o.Severity, o.Title)
+			fmt.Printf("   %s\n", o.Detail)
+			if o.File != "" {
+				fmt.Printf("   File: %s\n", o.File)
 			}
-			fmt.Printf("   Action: %s\n\n", d.Action)
+			fmt.Printf("   Action: %s\n\n", o.Action)
 		}
 
-		// Check for actionable discoveries
-		if !executor.HasActionableDiscoveries(discoveries) {
-			fmt.Println("No actionable discoveries (all are informational).")
+		// Check for actionable observations
+		if !executor.HasActionableObservations(observations) {
+			fmt.Println("No actionable observations (all are informational).")
 			return nil
 		}
 

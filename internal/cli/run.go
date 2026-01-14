@@ -102,12 +102,12 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 			return result.Error
 		}
 
-		// Run post-analysis to check discoveries and update subsequent plans
+		// Run post-analysis to check observations and update subsequent plans
 		analysisResult := exec.RunPostAnalysis(ctx, phase, plan, runSkipAnalysis)
 		if analysisResult.Error != nil {
 			fmt.Printf("Warning: post-analysis failed: %v\n", analysisResult.Error)
-		} else if analysisResult.DiscoveriesFound > 0 {
-			fmt.Printf("Analyzed %d discoveries\n", analysisResult.DiscoveriesFound)
+		} else if analysisResult.ObservationsFound > 0 {
+			fmt.Printf("Analyzed %d observations\n", analysisResult.ObservationsFound)
 		}
 
 		// Show what's next
@@ -130,6 +130,6 @@ func init() {
 	runCmd.Flags().StringVar(&runLoopStr, "loop", "", "run autonomous loop (optional: max iterations, default 10)")
 	runCmd.Flags().Lookup("loop").NoOptDefVal = "10"
 	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
-	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run discovery analysis")
+	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run observation analysis")
 	rootCmd.AddCommand(runCmd)
 }

@@ -14,9 +14,9 @@ import (
 	"github.com/fatih/color"
 )
 
-// Discovery represents a finding captured during plan execution
-type Discovery struct {
-	Type     string // bug, stub, api-issue, insight, blocker, technical-debt
+// Observation represents a finding captured during plan execution
+type Observation struct {
+	Type     string // bug, stub, api-issue, insight, blocker, technical-debt, etc.
 	Severity string // critical, high, medium, low, info
 	Title    string
 	Detail   string
@@ -26,13 +26,13 @@ type Discovery struct {
 
 // AnalysisResult holds the result of post-run analysis
 type AnalysisResult struct {
-	DiscoveriesFound int
-	PlansModified    int
-	NewPlansCreated  int
-	Error            error
+	ObservationsFound int
+	PlansModified     int
+	NewPlansCreated   int
+	Error             error
 }
 
-// RunPostAnalysis spawns an agent to analyze discoveries and potentially update subsequent plans
+// RunPostAnalysis spawns an agent to analyze observations and potentially update subsequent plans
 func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, skipAnalysis bool) *AnalysisResult {
 	result := &AnalysisResult{}
 	yellow := color.New(color.FgYellow).SprintFunc()
@@ -43,26 +43,26 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 		return result
 	}
 
-	// Read the completed plan to extract discoveries
+	// Read the completed plan to extract observations
 	planContent, err := os.ReadFile(plan.Path)
 	if err != nil {
 		result.Error = fmt.Errorf("cannot read plan for analysis: %w", err)
 		return result
 	}
 
-	discoveries := ParseDiscoveries(string(planContent))
-	result.DiscoveriesFound = len(discoveries)
+	observations := ParseObservations(string(planContent))
+	result.ObservationsFound = len(observations)
 
-	if len(discoveries) == 0 {
-		fmt.Printf("[%s] %s No discoveries to analyze\n",
+	if len(observations) == 0 {
+		fmt.Printf("[%s] %s No observations to analyze\n",
 			time.Now().Format("15:04:05"), yellow("Analysis:"))
 		return result
 	}
 
 	cyan := color.New(color.FgCyan).SprintFunc()
 
-	fmt.Printf("[%s] %s Found %d discoveries, running analysis...\n",
-		time.Now().Format("15:04:05"), cyan("Analysis:"), len(discoveries))
+	fmt.Printf("[%s] %s Found %d observations, running analysis...\n",
+		time.Now().Format("15:04:05"), cyan("Analysis:"), len(observations))
 
 	// Find subsequent plans in this phase and future phases
 	subsequentPlans := e.findSubsequentPlans(phase, plan)
@@ -73,7 +73,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	}
 
 	// Build the analysis prompt
-	prompt := e.buildAnalysisPrompt(plan, discoveries, subsequentPlans)
+	prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans)
 
 	// Execute analysis with Claude - includes Write tool for plan creation/restructuring
 	opts := llm.ExecuteOptions{
@@ -120,34 +120,45 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	return result
 }
 
-// ParseDiscoveries extracts discovery blocks from PLAN.md content
-func ParseDiscoveries(content string) []Discovery {
-	var discoveries []Discovery
+// ParseObservations extracts observation blocks from PLAN.md content
+// Also supports legacy <discovery> tags for backward compatibility
+func ParseObservations(content string) []Observation {
+	yellow := color.New(color.FgYellow).SprintFunc()
 
-	// Match <discovery> blocks
-	pattern := regexp.MustCompile(`(?s)<discovery\s+type="([^"]+)"\s+severity="([^"]+)">\s*` +
+	// Check for prose observations that can't be parsed
+	prosePattern := regexp.MustCompile(`(?i)(##\s*Discovery:|##\s*Observation:|\*\*Discovery\*\*:|\*\*Finding\*\*:|\[Discovery)`)
+	if prosePattern.MatchString(content) {
+		fmt.Printf("[%s] %s Found prose observations - these cannot be parsed!\n",
+			time.Now().Format("15:04:05"), yellow("⚠ Warning:"))
+		fmt.Printf("           Use XML format: <observation type=\"...\">...</observation>\n")
+	}
+
+	var observations []Observation
+
+	// Match both <observation> and <discovery> blocks (for backward compat)
+	pattern := regexp.MustCompile(`(?s)<(observation|discovery)\s+type="([^"]+)"\s+severity="([^"]+)">\s*` +
 		`<title>([^<]+)</title>\s*` +
 		`<detail>([^<]+)</detail>\s*` +
 		`(?:<file>([^<]*)</file>\s*)?` +
 		`<action>([^<]+)</action>\s*` +
-		`</discovery>`)
+		`</(observation|discovery)>`)
 
 	matches := pattern.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
-		if len(match) >= 7 {
-			d := Discovery{
-				Type:     strings.TrimSpace(match[1]),
-				Severity: strings.TrimSpace(match[2]),
-				Title:    strings.TrimSpace(match[3]),
-				Detail:   strings.TrimSpace(match[4]),
-				File:     strings.TrimSpace(match[5]),
-				Action:   strings.TrimSpace(match[6]),
+		if len(match) >= 8 {
+			o := Observation{
+				Type:     strings.TrimSpace(match[2]),
+				Severity: strings.TrimSpace(match[3]),
+				Title:    strings.TrimSpace(match[4]),
+				Detail:   strings.TrimSpace(match[5]),
+				File:     strings.TrimSpace(match[6]),
+				Action:   strings.TrimSpace(match[7]),
 			}
-			discoveries = append(discoveries, d)
+			observations = append(observations, o)
 		}
 	}
 
-	return discoveries
+	return observations
 }
 
 // findSubsequentPlans returns paths to plans that come after the current one
@@ -176,23 +187,23 @@ func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *s
 }
 
 // buildAnalysisPrompt creates the prompt for the post-run analysis agent
-func (e *Executor) buildAnalysisPrompt(plan *state.Plan, discoveries []Discovery, subsequentPlans []string) string {
-	var discoveriesText strings.Builder
-	for i, d := range discoveries {
-		discoveriesText.WriteString(fmt.Sprintf("%d. [%s/%s] %s\n", i+1, d.Type, d.Severity, d.Title))
-		discoveriesText.WriteString(fmt.Sprintf("   Detail: %s\n", d.Detail))
-		if d.File != "" {
-			discoveriesText.WriteString(fmt.Sprintf("   File: %s\n", d.File))
+func (e *Executor) buildAnalysisPrompt(plan *state.Plan, observations []Observation, subsequentPlans []string) string {
+	var observationsText strings.Builder
+	for i, o := range observations {
+		observationsText.WriteString(fmt.Sprintf("%d. [%s/%s] %s\n", i+1, o.Type, o.Severity, o.Title))
+		observationsText.WriteString(fmt.Sprintf("   Detail: %s\n", o.Detail))
+		if o.File != "" {
+			observationsText.WriteString(fmt.Sprintf("   File: %s\n", o.File))
 		}
-		discoveriesText.WriteString(fmt.Sprintf("   Action: %s\n\n", d.Action))
+		observationsText.WriteString(fmt.Sprintf("   Action: %s\n\n", o.Action))
 	}
 
-	return fmt.Sprintf(`You are analyzing discoveries from a completed plan execution.
+	return fmt.Sprintf(`You are analyzing observations from a completed plan execution.
 
 ## Just-Completed Plan
 %s
 
-## Discoveries from Execution
+## Observations from Execution
 %s
 
 ## Subsequent Plans to Review
@@ -200,9 +211,9 @@ func (e *Executor) buildAnalysisPrompt(plan *state.Plan, discoveries []Discovery
 
 ## Your Task
 
-Review each discovery and determine its impact on subsequent plans.
+Review each observation and determine its impact on subsequent plans.
 
-### Discovery Types and Actions
+### Observation Types and Actions
 
 **High-impact types for plan restructuring:**
 - **assumption**: A decision was made without full information - check if subsequent plans rely on this assumption
@@ -217,21 +228,21 @@ Review each discovery and determine its impact on subsequent plans.
 
 ### Plan Restructuring Authority
 
-You have FULL AUTHORITY to restructure the plan sequence based on discoveries. This includes:
+You have FULL AUTHORITY to restructure the plan sequence based on observations. This includes:
 
 #### 1. REORDER PLANS
-If discoveries show Plan X depends on Plan Y (but Y comes after X), reorder the sequence:
+If observations show Plan X depends on Plan Y (but Y comes after X), reorder the sequence:
 - Renumber plan files to reflect the new order (e.g., if Plan 05 must come before Plan 03, rename files accordingly)
 - Update ROADMAP.md to show the new sequence
 - Document the reason for reordering
 
 Example:
   Before: Plan 1 -> Plan 2 -> Plan 3 -> Plan 4 -> Plan 5
-  Discovery: Plan 3 depends on Plan 5
+  Observation: Plan 3 depends on Plan 5
   After:  Plan 1 -> Plan 2 -> Plan 5 -> Plan 3 -> Plan 4
 
 #### 2. CREATE NEW PLANS
-If discoveries reveal work not covered by any existing plan:
+If observations reveal work not covered by any existing plan:
 - Create new XX-PLAN.md files using the standard plan template
 - Insert at the appropriate position in the sequence
 - Update ROADMAP.md to include the new plan
@@ -248,13 +259,13 @@ status: pending
 # Phase [X] Plan [Y]: [Name]
 
 ## Objective
-[What this plan accomplishes - derived from discovery]
+[What this plan accomplishes - derived from observation]
 
 ## Context
-Created by analysis agent based on discovery:
-- Type: [discovery type]
+Created by analysis agent based on observation:
+- Type: [observation type]
 - From: [original plan path]
-- Detail: [discovery detail]
+- Detail: [observation detail]
 
 ## Tasks
 <task type="auto">
@@ -270,7 +281,7 @@ Created by analysis agent based on discovery:
 ` + "```" + `
 
 #### 3. SKIP/REMOVE PLANS
-If discoveries show planned work is already complete:
+If observations show planned work is already complete:
 - Mark the plan as SKIPPED in ROADMAP.md with reason
 - Document evidence of completion (files that exist, tests that pass, etc.)
 - Remove from active execution queue (but keep original file for reference)
@@ -283,26 +294,26 @@ ALL restructuring changes MUST be reflected in ROADMAP.md:
 
 ### Action Guidelines
 
-For discoveries with action "needs-fix", "needs-implementation", or "needs-plan":
+For observations with action "needs-fix", "needs-implementation", or "needs-plan":
 1. Read the relevant subsequent plan files
-2. Determine if the discovery:
+2. Determine if the observation:
    - Invalidates tasks in a plan (work is already done, or approach is wrong) -> SKIP the plan
    - Means a dependency must be resolved first -> REORDER plans
    - Requires work not covered by any plan -> CREATE new plan
    - Suggests plan order should change -> REORDER plans
 
-For discoveries with action "needs-documentation":
+For observations with action "needs-documentation":
 1. Suggest updates to CLAUDE.md or project documentation
-2. Note which tooling friction or environment discoveries should be captured
+2. Note which tooling friction or environment observations should be captured
 3. Add context to plans if the documentation affects their execution
 
-For discoveries with action "needs-investigation":
+For observations with action "needs-investigation":
 1. Add investigation notes to relevant plans
 2. Flag assumptions that need verification before proceeding
 3. Consider creating a new investigation plan if scope is significant
 
 For each plan that needs updating:
-1. Add a note in the plan's <context> section referencing the discovery
+1. Add a note in the plan's <context> section referencing the observation
 2. If a task is invalidated, add a note explaining why
 3. If a blocker exists, add a <blocker> tag at the top
 
@@ -310,14 +321,14 @@ For each plan that needs updating:
 - All restructuring is logged in execution history
 - Original plans are preserved (renamed, not deleted)
 - ROADMAP.md serves as audit trail
-- Document the discovery that triggered each change
+- Document the observation that triggered each change
 
 ## Rules
-- Only restructure if discoveries directly warrant it
+- Only restructure if observations directly warrant it
 - Do NOT modify the just-completed plan (only subsequent plans)
-- Keep changes minimal and targeted to the discovery
+- Keep changes minimal and targeted to the observation
 - Flag critical assumptions and scope-creep that may need human review
-- Commit changes with message: "chore(analysis): restructure plans based on [plan] discoveries"
+- Commit changes with message: "chore(analysis): restructure plans based on [plan] observations"
 
 ## Completion
 When done analyzing, output a brief summary:
@@ -329,13 +340,13 @@ When done analyzing, output a brief summary:
 - Any critical issues that need immediate attention
 
 Signal completion with: ###ANALYSIS_COMPLETE###
-`, plan.Path, discoveriesText.String(), strings.Join(subsequentPlans, "\n"))
+`, plan.Path, observationsText.String(), strings.Join(subsequentPlans, "\n"))
 }
 
-// HasActionableDiscoveries returns true if any discoveries require action
-func HasActionableDiscoveries(discoveries []Discovery) bool {
-	for _, d := range discoveries {
-		switch d.Action {
+// HasActionableObservations returns true if any observations require action
+func HasActionableObservations(observations []Observation) bool {
+	for _, o := range observations {
+		switch o.Action {
 		case "needs-fix", "needs-implementation", "needs-plan", "needs-investigation", "needs-documentation":
 			return true
 		}
@@ -343,8 +354,8 @@ func HasActionableDiscoveries(discoveries []Discovery) bool {
 	return false
 }
 
-// FilterBySeverity returns discoveries at or above the given severity
-func FilterBySeverity(discoveries []Discovery, minSeverity string) []Discovery {
+// FilterBySeverity returns observations at or above the given severity
+func FilterBySeverity(observations []Observation, minSeverity string) []Observation {
 	severityOrder := map[string]int{
 		"critical": 5,
 		"high":     4,
@@ -354,10 +365,10 @@ func FilterBySeverity(discoveries []Discovery, minSeverity string) []Discovery {
 	}
 
 	minLevel := severityOrder[minSeverity]
-	var filtered []Discovery
-	for _, d := range discoveries {
-		if severityOrder[d.Severity] >= minLevel {
-			filtered = append(filtered, d)
+	var filtered []Observation
+	for _, o := range observations {
+		if severityOrder[o.Severity] >= minLevel {
+			filtered = append(filtered, o)
 		}
 	}
 	return filtered
@@ -374,8 +385,8 @@ type CheckpointVerification struct {
 	NeedsHuman     []string // What still needs human review
 }
 
-// CollectCheckpointDiscoveries scans all completed plans in a phase for checkpoint-automated discoveries
-func (e *Executor) CollectCheckpointDiscoveries(phase *state.Phase) []CheckpointVerification {
+// CollectCheckpointObservations scans all completed plans in a phase for checkpoint-automated observations
+func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []CheckpointVerification {
 	var verifications []CheckpointVerification
 
 	for _, plan := range phase.Plans {
@@ -389,19 +400,19 @@ func (e *Executor) CollectCheckpointDiscoveries(phase *state.Phase) []Checkpoint
 			continue
 		}
 
-		discoveries := ParseDiscoveries(string(content))
-		for _, d := range discoveries {
-			if d.Type == "checkpoint-automated" && d.Action == "needs-human-verify" {
+		observations := ParseObservations(string(content))
+		for _, o := range observations {
+			if o.Type == "checkpoint-automated" && o.Action == "needs-human-verify" {
 				verification := CheckpointVerification{
 					PlanNumber:     plan.Number,
 					PlanName:       plan.Name,
 					PlanPath:       plan.Path,
-					CheckpointName: d.Title,
-					AutomatedTest:  d.File,
+					CheckpointName: o.Title,
+					AutomatedTest:  o.File,
 				}
 
 				// Parse detail for automated/needs-human breakdown
-				lines := strings.Split(d.Detail, "\n")
+				lines := strings.Split(o.Detail, "\n")
 				for _, line := range lines {
 					line = strings.TrimSpace(line)
 					if strings.HasPrefix(line, "Automated aspects:") {
@@ -452,8 +463,8 @@ func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error)
 		return false, nil
 	}
 
-	// Collect all checkpoint discoveries that need human verification
-	verifications := e.CollectCheckpointDiscoveries(phase)
+	// Collect all checkpoint observations that need human verification
+	verifications := e.CollectCheckpointObservations(phase)
 	if len(verifications) == 0 {
 		// No verifications needed
 		fmt.Printf("[%s] %s Phase complete with no pending verifications\n",
