@@ -205,9 +205,14 @@ func FindNextPlan(phases []Phase) (*Phase, *Plan) {
 }
 
 // CountPlans returns total and completed plan counts
+// Excludes special plans (XX-00-decisions and XX-99+-verification) to match IsPhaseComplete behavior
 func CountPlans(phases []Phase) (total, completed int) {
 	for _, phase := range phases {
 		for _, plan := range phase.Plans {
+			// Skip special plans (decisions XX-00 and verification XX-99+)
+			if plan.Number == 0 || plan.Number >= 99 {
+				continue
+			}
 			total++
 			if plan.IsCompleted {
 				completed++

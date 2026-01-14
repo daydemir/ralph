@@ -241,6 +241,8 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	fmt.Println()
 
 	var lastPhaseNumber int = -1
+	var lastPlanPath string
+	var lastProgressContent string
 
 	for i := 1; i <= maxIterations; i++ {
 		// Reload phases to get current state
@@ -255,6 +257,21 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 			fmt.Printf("\n%s All plans complete!\n", green("✓"))
 			return nil
 		}
+
+		// Check for stuck loop - same plan found twice with NO progress made
+		// This allows bailout recovery (same plan, but Progress section updated)
+		if plan.Path == lastPlanPath {
+			currentProgress := extractProgressSection(plan.Path)
+			if currentProgress == lastProgressContent {
+				// Same progress = truly stuck (no work was done)
+				return fmt.Errorf("stuck on plan %s - Progress section unchanged after execution", plan.Name)
+			}
+			// Progress section was updated = bailout recovery, allow continuation
+			fmt.Printf("[%s] %s Resuming %s (Progress updated, continuing)\n",
+				time.Now().Format("15:04:05"), cyan("↻"), plan.Name)
+		}
+		lastPlanPath = plan.Path
+		lastProgressContent = extractProgressSection(plan.Path)
 
 		// Check if we're starting a new phase - if so, scan for decision checkpoints
 		if phase.Number != lastPhaseNumber {
@@ -308,10 +325,12 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 			if result.Error != nil {
 				fmt.Printf("   Warning: %v\n", result.Error)
 			}
+			fmt.Println()
+		} else {
+			// Only print checkmark on actual success
+			fmt.Printf("%s Complete (%s)\n", green("✓"), result.Duration.Round(time.Second))
+			fmt.Println()
 		}
-
-		fmt.Printf("%s Complete (%s)\n", green("✓"), result.Duration.Round(time.Second))
-		fmt.Println()
 	}
 
 	fmt.Printf("\nReached max iterations (%d). Run 'ralph run --loop' to continue.\n", maxIterations)
@@ -750,6 +769,23 @@ func (e *Executor) verifyProgressUpdated(planPath string) bool {
 
 	// Check for ## Progress section in the file
 	return strings.Contains(string(content), "## Progress")
+}
+
+// extractProgressSection returns the content of the ## Progress section from a plan file
+// Used to detect if progress was made between executions (for stuck loop detection)
+func extractProgressSection(planPath string) string {
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		return ""
+	}
+
+	// Extract everything after ## Progress until the next section or EOF
+	re := regexp.MustCompile(`(?s)## Progress\n(.*?)(?:## |\z)`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) < 2 {
+		return ""
+	}
+	return matches[1]
 }
 
 // CheckGSDInstalled verifies GSD is installed

@@ -307,6 +307,55 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 				}
 			}
 		case "result":
+			// Check for failure/termination signals in result events too
+			// These can appear when Claude outputs them in its final message
+			if match := taskFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				handler.OnFailure(FailureSignal{Type: "task_failed", Detail: strings.TrimSpace(match[1])})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			if match := planFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				handler.OnFailure(FailureSignal{Type: "plan_failed", Detail: strings.TrimSpace(match[1])})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			if match := blockedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				handler.OnFailure(FailureSignal{Type: "blocked", Detail: strings.TrimSpace(match[1])})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			if match := bailoutPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				handler.OnFailure(FailureSignal{Type: "bailout", Detail: strings.TrimSpace(match[1])})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			if match := buildFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				handler.OnFailure(FailureSignal{Type: "build_failed", Detail: strings.TrimSpace(match[1])})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			if match := testFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
+				detail := strings.TrimSpace(match[1])
+				if len(match) > 2 && match[2] != "" {
+					detail = detail + ":" + strings.TrimSpace(match[2])
+				}
+				handler.OnFailure(FailureSignal{Type: "test_failed", Detail: detail})
+				if onTerminate != nil {
+					onTerminate()
+				}
+				return nil
+			}
+			// Check for completion signals
 			if iterationPattern.MatchString(event.Result) {
 				handler.OnIterationComplete()
 			}
