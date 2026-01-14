@@ -14,6 +14,15 @@ import (
 	"github.com/fatih/color"
 )
 
+// FailureType indicates the severity of a failure
+type FailureType int
+
+const (
+	FailureNone FailureType = iota // No failure
+	FailureHard                     // Task/verification failed - stop loop
+	FailureSoft                     // Signal missing or bailout - continue loop
+)
+
 // Config holds executor configuration
 type Config struct {
 	ClaudeBinary           string
@@ -52,6 +61,7 @@ func New(config *Config) *Executor {
 type RunResult struct {
 	PlanPath    string
 	Success     bool
+	FailureType FailureType
 	Duration    time.Duration
 	Error       error
 	TasksFailed []string
@@ -118,17 +128,20 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		failure := handler.GetFailure()
 		result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
 		result.TasksFailed = []string{failure.Detail}
+		result.FailureType = FailureHard
 		fmt.Printf("[%s] %s %s: %s\n", time.Now().Format("15:04:05"), red("✗"), failure.Type, failure.Detail)
 	} else if handler.IsPlanComplete() {
 		result.Success = true
+		result.FailureType = FailureNone
 		fmt.Printf("[%s] %s Plan complete!\n", time.Now().Format("15:04:05"), green("✓"))
 	} else if handler.ShouldBailOut() {
 		result.Error = fmt.Errorf("token limit reached: %d tokens", tokenStats.TotalTokens)
+		result.FailureType = FailureSoft
 		fmt.Printf("[%s] %s Token limit bailout at %d tokens\n", time.Now().Format("15:04:05"), yellow("⚠"), tokenStats.TotalTokens)
 	} else {
-		// Claude exited without signaling - treat as incomplete, not failure
+		result.FailureType = FailureSoft
 		fmt.Printf("[%s] %s Claude exited without completion signal\n", time.Now().Format("15:04:05"), yellow("⚠"))
-		fmt.Println("   Plan may be incomplete. Run 'ralph run' to continue.")
+		fmt.Println("   Work may be complete. Continuing to next plan...")
 	}
 
 	result.Duration = time.Since(start)
@@ -145,6 +158,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	cyan := color.New(color.FgCyan).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
 	bold := color.New(color.Bold).SprintFunc()
 
 	fmt.Println(bold("=== Ralph Autonomous Loop ==="))
@@ -172,13 +186,21 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		result := e.ExecutePlan(ctx, phase, plan)
 
 		if !result.Success {
-			fmt.Printf("\n%s FAILED: %s\n", red("✗"), plan.Name)
-			if result.Error != nil {
-				fmt.Printf("   Error: %v\n", result.Error)
+			if result.FailureType == FailureHard {
+				// Hard failure - stop the loop
+				fmt.Printf("\n%s FAILED: %s\n", red("✗"), plan.Name)
+				if result.Error != nil {
+					fmt.Printf("   Error: %v\n", result.Error)
+				}
+				fmt.Printf("\nStopping loop. %d plans complete, 1 failed.\n", completed)
+				fmt.Println("Run 'ralph status' for details.")
+				return result.Error
 			}
-			fmt.Printf("\nStopping loop. %d plans complete, 1 failed.\n", completed)
-			fmt.Println("Run 'ralph status' for details.")
-			return result.Error
+			// Soft failure - warn but continue to next plan
+			fmt.Printf("\n%s %s (soft failure, continuing to next plan)\n", yellow("⚠"), plan.Name)
+			if result.Error != nil {
+				fmt.Printf("   Warning: %v\n", result.Error)
+			}
 		}
 
 		fmt.Printf("%s Complete (%s)\n", green("✓"), result.Duration.Round(time.Second))
@@ -255,9 +277,22 @@ Add a ## Discoveries section to the PLAN.md file with XML-structured entries:
 </discovery>
 `+"```"+`
 
-**Types:** bug, stub, api-issue, insight, blocker, technical-debt
+**Types:** bug, stub, api-issue, insight, blocker, technical-debt, tooling-friction, env-discovery
 **Severity:** critical, high, medium, low, info
-**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, none
+**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, none
+
+**Tooling friction examples** (things discovered through trial-and-error):
+- Correct command syntax (e.g., "Test target is 'Unit Tests iOS' not 'Tests iOS'")
+- File locations found after searching
+- Build/test quirks (e.g., "Must use -destination 'generic/platform=iOS Simulator'")
+
+Example friction discovery:
+<discovery type="tooling-friction" severity="info">
+  <title>Xcode test target naming</title>
+  <detail>Test target is "Unit Tests iOS", not "Tests iOS". Found via xcodebuild -list</detail>
+  <file>ar/AR/AR.xcodeproj</file>
+  <action>needs-documentation</action>
+</discovery>
 
 Record discoveries AS YOU FIND THEM, not at the end. This ensures learnings survive context limits.
 

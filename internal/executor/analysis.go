@@ -196,6 +196,11 @@ For discoveries with action "needs-fix", "needs-implementation", or "needs-plan"
    - Means a dependency must be resolved first
    - Requires a new plan to be created
 
+For discoveries with action "needs-documentation":
+1. Suggest updates to CLAUDE.md or project documentation
+2. Note which tooling friction or environment discoveries should be captured
+3. Add context to plans if the documentation affects their execution
+
 For each plan that needs updating:
 1. Add a note in the plan's <context> section referencing the discovery
 2. If a task is invalidated, add a note explaining why
@@ -221,7 +226,7 @@ Signal completion with: ###ANALYSIS_COMPLETE###
 func HasActionableDiscoveries(discoveries []Discovery) bool {
 	for _, d := range discoveries {
 		switch d.Action {
-		case "needs-fix", "needs-implementation", "needs-plan", "needs-investigation":
+		case "needs-fix", "needs-implementation", "needs-plan", "needs-investigation", "needs-documentation":
 			return true
 		}
 	}

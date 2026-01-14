@@ -13,6 +13,15 @@
 
 Ralph executes your development plans automatically. You define what to build, Ralph breaks it into phases, creates detailed task plans, and executes them with verification. Each run preserves learnings in a `## Progress` section within the PLAN.md file for the next run.
 
+## Table of Contents
+- [How It Works](#how-it-works)
+- [When to Use Ralph](#when-to-use-ralph)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+
 **Planning is mandatory** - Ralph enforces that you properly understand and plan work before executing.
 
 ## How It Works
@@ -126,7 +135,7 @@ Use `ralph list` for a compact view of all phases and plans.
 1. **Claude Code CLI** - [Install Claude Code](https://claude.ai/code)
 2. **GSD (Get Shit Done)** - Required for planning:
    ```bash
-   npx get-shit-done-cc --global
+   npm install -g get-shit-done-cc
    ```
 
 ### Install Ralph
@@ -245,6 +254,11 @@ Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive 
 | `ralph run --loop [N]` | Autonomous loop up to N plans (default 10) |
 | `ralph run --model MODEL` | Use specific model (sonnet, opus, haiku) |
 | `ralph status` | Dashboard: current phase, progress, suggested actions |
+
+Model options:
+- **sonnet** (default): Best balance of speed and capability
+- **opus**: More capable but slower, for complex phases
+- **haiku**: Fastest, for simple repetitive tasks
 | `ralph status -v` | Verbose: show all phases and plans with completion status |
 | `ralph list` | Compact list of all phases and plans |
 
@@ -256,20 +270,7 @@ Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive 
 | `ralph insert-phase N "desc"` | Insert urgent work as phase N.1 |
 | `ralph remove-phase N` | Remove phase N and renumber |
 
-## Enforced Workflow
-
-Ralph requires proper planning before execution. You can't skip steps:
-
-```
-ralph init      → REQUIRED first (can't run anything without PROJECT.md)
-ralph roadmap   → REQUIRED (can't plan phases without ROADMAP.md)
-ralph discover  → optional (builds research context)
-ralph discuss   → optional (builds alignment context)
-ralph plan N    → REQUIRED (can't run without PLAN.md files)
-ralph run       → Only works if valid PLAN.md exists
-```
-
-**Key principle:** Work through one phase at a time. Don't plan Phase 2 until Phase 1 is complete. STATE.md tracks your current position so you can resume anytime.
+**Planning is mandatory** - Ralph enforces that you properly understand and plan work before executing.
 
 ## Workspace Structure
 
@@ -388,12 +389,13 @@ Ralph uses sensible defaults if no config file exists.
 
 | Problem | Solution |
 |---------|----------|
-| "GSD not installed" error | Run `npx get-shit-done-cc --global` to install GSD |
+| "GSD not installed" error | Run `npm install -g get-shit-done-cc` to install GSD |
 | "No ROADMAP.md found" | Run `ralph init` then `ralph roadmap` first |
 | Plan execution fails | Run `ralph status -v` to see current state, check the PLAN.md file for issues, fix manually then retry |
 | "Context exceeded" errors | Plan may be too large - break the phase into smaller sub-phases |
 | Claude hangs or times out | Check network connection; Ralph has 60-minute inactivity timeout (not total time) |
 | Wrong phase executing | Check STATE.md in `.planning/` - manually edit if needed to reset position |
+| Ralph was interrupted mid-plan | Run `ralph status` to see state, then `ralph run` to resume |
 
 ## Previous Version
 

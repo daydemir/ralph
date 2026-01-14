@@ -80,7 +80,7 @@ Use --verbose for detailed information including decisions and issues.`,
 		bold := color.New(color.Bold).SprintFunc()
 		dim := color.New(color.FgHiBlack).SprintFunc()
 
-		fmt.Printf("%s v%s - %s\n\n", bold("Ralph"), version, st.ProjectName)
+		fmt.Printf("%s\n%s\n\n", bold(st.ProjectName), dim(fmt.Sprintf("ralph v%s", version)))
 
 		// Project artifacts
 		printArtifacts(gsd, phases, green, dim)
@@ -99,7 +99,11 @@ Use --verbose for detailed information including decisions and issues.`,
 		fmt.Println(bold("📍 Current Position:"))
 		if st.CurrentPhase > 0 {
 			fmt.Printf("  Phase: %d of %d\n", st.CurrentPhase, st.TotalPhases)
-			fmt.Printf("  Plan:  %d of %d\n", st.CurrentPlan, st.TotalPlans)
+			if nextPlan != nil {
+				fmt.Printf("  Plan:  %s (next)\n", nextPlan.Name)
+			} else {
+				fmt.Printf("  Plan:  All complete\n")
+			}
 			fmt.Printf("  Status: %s\n", st.Status)
 		} else if nextPhase != nil {
 			fmt.Printf("  Phase: %d (%s)\n", nextPhase.Number, nextPhase.Name)
