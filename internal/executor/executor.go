@@ -365,6 +365,23 @@ To maximize analysis effectiveness:
 - Flag assumptions that might affect future plans
 - Note any work that was already complete (to avoid duplication)
 
+### Discovery Philosophy: OVER-REPORT
+
+**When in doubt, record it.** It's better to log 10 minor observations than miss 1 important insight.
+
+Record discoveries for:
+- Anything that surprised you (even slightly)
+- Decisions you made without explicit guidance
+- Patterns you noticed in the codebase
+- Things that took longer than expected (why?)
+- Things that were easier than expected (why?)
+- Workarounds you used
+- Commands/syntax you figured out through trial-and-error
+- Files you found that weren't mentioned in the plan
+- Assumptions you made about how something works
+
+The analysis agent uses discoveries to improve subsequent plans. Under-reporting means lost learning. Over-reporting is cheap - just record it.
+
 ### Background Task Verification (MANDATORY)
 
 BEFORE signaling ###PLAN_COMPLETE###, you MUST verify all background tasks have finished:
@@ -407,6 +424,11 @@ Ralph monitors your token usage and will terminate at 120K tokens as a safety ne
 - Count your tool calls: if > 50 tool calls without task completion, you're burning context
 - Watch for repeated errors: 3+ retries of same fix = stuck, bail out
 - File reading volume: if you've read > 20 files without progress, context is bloated
+
+**Use subagents for writing to save context:**
+- Use Task tool (subagent_type="general-purpose") for recording discoveries and progress updates
+- Prompt: "Update PLAN.md with discoveries: [list what you found]. Update Progress section: [current state]"
+- This offloads file editing work to a fresh subagent context, preserving your main context for execution
 
 **At ~100K tokens, proactively bail out:**
 1. Update the PLAN.md Progress section with current state
@@ -454,9 +476,13 @@ After completing each task, add/update a ## Progress section at the end of the P
 
 This ensures the next run can continue where you left off if context runs low.
 
-## Discovery Recording (MANDATORY)
+## Discovery Recording (MANDATORY - OVER-REPORT)
 
-During execution, record ANY findings that don't fit the plan:
+**Philosophy: When in doubt, record it.**
+
+Record discoveries LIBERALLY. It's far better to log 10 minor observations than miss 1 important insight. The analysis agent filters what matters - your job is to capture everything.
+
+Record ANY of these during execution:
 - Tests that are stubs but marked as passing
 - APIs behaving differently than documented
 - Bugs found in existing code
@@ -525,7 +551,16 @@ Example discoveries:
   <action>needs-plan</action>
 </discovery>
 
-Record discoveries AS YOU FIND THEM, not at the end. This ensures learnings survive context limits and the analysis agent can act on them.
+**Also record (things people often skip but shouldn't):**
+- Commands/syntax figured out through trial-and-error
+- Files you found that weren't mentioned in the plan
+- Anything that surprised you (even slightly)
+- Decisions you made without explicit guidance
+- Patterns you noticed in the codebase
+- Why something took longer or shorter than expected
+- Workarounds you used
+
+Record discoveries AS YOU FIND THEM, not at the end. The analysis agent uses discoveries to improve subsequent plans. Under-reporting = lost learning. Over-reporting is cheap.
 
 ## Build & Test Verification (MANDATORY)
 
@@ -586,6 +621,11 @@ Ralph is monitoring your token usage and will terminate at 120K tokens as a safe
 - Count your tool calls: if > 50 tool calls without task completion, you're burning context
 - Watch for repeated errors: 3+ retries of same fix = stuck, bail out
 - File reading volume: if you've read > 20 files without progress, context is bloated
+
+**Use subagents for writing to save context:**
+- Use Task tool (subagent_type="general-purpose") for recording discoveries and progress updates
+- Prompt: "Update PLAN.md with discoveries: [list what you found]. Update Progress section: [current state]"
+- This offloads file editing work to a fresh subagent context, preserving your main context for execution
 
 **At ~100K tokens, proactively bail out:**
 1. Update the PLAN.md Progress section with current state

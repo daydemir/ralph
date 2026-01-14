@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
@@ -12,8 +13,7 @@ import (
 )
 
 var (
-	runLoop         bool
-	runLoopCount    int
+	runLoopStr      string
 	runModel        string
 	runSkipAnalysis bool
 )
@@ -29,13 +29,13 @@ Single execution (default):
   Executes the next incomplete plan and stops.
 
 Autonomous loop:
-  ralph run --loop
-  ralph run --loop 5
+  ralph run --loop        (default: 10 iterations)
+  ralph run --loop 15     (15 iterations)
 
   Runs multiple plans automatically until:
   - All plans complete
   - A verification fails
-  - Max iterations reached (default 10)
+  - Max iterations reached
 
 Each plan gets a fresh Claude context for optimal quality.
 Verification failures stop the loop immediately.`,
@@ -87,11 +87,11 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 
 		ctx := context.Background()
 
-		if runLoop {
+		if runLoopStr != "" {
 			// Autonomous loop mode
-			maxIterations := runLoopCount
-			if maxIterations <= 0 {
-				maxIterations = 10
+			maxIterations := 10
+			if n, err := strconv.Atoi(runLoopStr); err == nil && n > 0 {
+				maxIterations = n
 			}
 			return exec.LoopWithAnalysis(ctx, maxIterations, runSkipAnalysis)
 		}
@@ -127,8 +127,8 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 }
 
 func init() {
-	runCmd.Flags().BoolVar(&runLoop, "loop", false, "run autonomous loop")
-	runCmd.Flags().IntVarP(&runLoopCount, "count", "n", 10, "max iterations for loop mode")
+	runCmd.Flags().StringVar(&runLoopStr, "loop", "", "run autonomous loop (optional: max iterations, default 10)")
+	runCmd.Flags().Lookup("loop").NoOptDefVal = "10"
 	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
 	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run discovery analysis")
 	rootCmd.AddCommand(runCmd)
