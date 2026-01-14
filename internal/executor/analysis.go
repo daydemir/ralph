@@ -105,9 +105,9 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	}
 	defer reader.Close()
 
-	// Parse the stream output
+	// Parse the stream output (no termination callback - analysis should run to completion)
 	handler := llm.NewConsoleHandler()
-	if err := llm.ParseStream(reader, handler); err != nil {
+	if err := llm.ParseStream(reader, handler, nil); err != nil {
 		result.Error = fmt.Errorf("analysis stream parsing failed: %w", err)
 		return result
 	}

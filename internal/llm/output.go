@@ -188,7 +188,9 @@ func (h *ConsoleHandler) GetBailout() *FailureSignal {
 }
 
 // ParseStream reads the Claude stream-json output and calls the handler
-func ParseStream(reader io.Reader, handler OutputHandler) error {
+// onTerminate is called when a termination signal (bailout, hard failure) is detected
+// to allow the caller to cancel the context and kill the Claude process
+func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) error {
 	scanner := bufio.NewScanner(reader)
 	// Increase buffer size for large JSON lines
 	buf := make([]byte, 0, 64*1024)
@@ -251,21 +253,42 @@ func ParseStream(reader io.Reader, handler OutputHandler) error {
 								ch.planComplete = true
 							}
 						}
-						// Check for failure signals
+						// Check for failure/termination signals
+						// When detected, notify handler and terminate the Claude process immediately
 						if match := taskFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "task_failed", Detail: strings.TrimSpace(match[1])})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						if match := planFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "plan_failed", Detail: strings.TrimSpace(match[1])})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						if match := blockedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "blocked", Detail: strings.TrimSpace(match[1])})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						if match := bailoutPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "bailout", Detail: strings.TrimSpace(match[1])})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						if match := buildFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							handler.OnFailure(FailureSignal{Type: "build_failed", Detail: strings.TrimSpace(match[1])})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						if match := testFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
 							detail := strings.TrimSpace(match[1])
@@ -273,6 +296,10 @@ func ParseStream(reader io.Reader, handler OutputHandler) error {
 								detail = detail + ":" + strings.TrimSpace(match[2])
 							}
 							handler.OnFailure(FailureSignal{Type: "test_failed", Detail: detail})
+							if onTerminate != nil {
+								onTerminate()
+							}
+							return nil
 						}
 						// Output text
 						handler.OnText(cleanText(content.Text))

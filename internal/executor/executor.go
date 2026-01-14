@@ -128,8 +128,12 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		WorkDir: e.config.WorkDir,
 	}
 
+	// Create a cancellable context for process termination on signals
+	execCtx, cancelExec := context.WithCancel(ctx)
+	defer cancelExec()
+
 	// Run Claude in streaming mode to capture output and signals
-	reader, err := e.claude.Execute(ctx, opts)
+	reader, err := e.claude.Execute(execCtx, opts)
 	if err != nil {
 		result.Error = fmt.Errorf("execution failed: %w", err)
 		fmt.Printf("[%s] %s Execution failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
@@ -138,9 +142,9 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	}
 	defer reader.Close()
 
-	// Parse the stream output
+	// Parse the stream output, with termination callback for failure/bailout signals
 	handler := llm.NewConsoleHandler()
-	if err := llm.ParseStream(reader, handler); err != nil {
+	if err := llm.ParseStream(reader, handler, cancelExec); err != nil {
 		result.Error = fmt.Errorf("stream parsing failed: %w", err)
 		fmt.Printf("[%s] %s Stream parsing failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
 		result.Duration = time.Since(start)
