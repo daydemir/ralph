@@ -447,6 +447,53 @@ Ralph uses sensible defaults if no config file exists.
 
 The v0.x PRD-based system is archived in `archive/v0-shell/`.
 
+## Development
+
+### Building from Source
+
+```bash
+# Clone and build
+git clone https://github.com/daydemir/ralph.git
+cd ralph
+go build -o ralph ./cmd/ralph
+
+# Install to $GOPATH/bin
+go install ./cmd/ralph
+```
+
+### Releasing a New Version
+
+Ralph uses [GoReleaser](https://goreleaser.com/) to build binaries and update the Homebrew formula.
+
+```bash
+# 1. Commit your changes
+git add .
+git commit -m "feat: your feature description"
+
+# 2. Tag the new version
+git tag -a v0.X.0 -m "Release description"
+
+# 3. Push with tags
+git push origin main --tags
+
+# 4. Run GoReleaser (requires GitHub token)
+GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
+```
+
+**Note:** The `gh auth token` command uses the GitHub CLI to get your token. You need `gh auth login` first with `repo` scope.
+
+GoReleaser will:
+- Build binaries for darwin/linux (amd64/arm64)
+- Create a GitHub release with changelog
+- Update the Homebrew formula in `daydemir/homebrew-tap`
+
+### Local Development Install
+
+```bash
+# Install with version (for testing before release)
+go install -ldflags "-X github.com/daydemir/ralph/internal/cli.Version=dev" ./cmd/ralph
+```
+
 ## License
 
 MIT
