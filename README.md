@@ -1,8 +1,123 @@
-# Ralph 2.0
+# Ralph GSD
 
-Autonomous plan execution engine built on [Get Shit Done (GSD)](https://github.com/glittercowboy/get-shit-done) planning.
+> [!WARNING]
+> **Claude Code Required** — This tool requires an active Claude Code subscription.
+>
+> **Cost Warning** — Running plans consumes Claude API usage. Autonomous loops can use significant quota.
+>
+> **Auto-Accept Mode** — Ralph runs Claude with `--dangerously-skip-permissions` enabled. It will make changes without confirmation prompts.
+>
+> **Recommendation** — Start with `ralph run` (single plan) to observe behavior before using `ralph run --loop`.
 
-Ralph wraps GSD's disciplined planning workflow and adds automated execution with verification. **Planning is mandatory** - Ralph enforces that you properly understand and plan work before executing.
+> Built on [Get Shit Done (GSD)](https://github.com/glittercowboy/get-shit-done) planning and inspired by the [original Ralph concept](https://ghuntley.com/ralph/) by Geoffrey Huntley.
+
+Ralph executes your development plans automatically. You define what to build, Ralph breaks it into phases, creates detailed task plans, and executes them with verification. Each run preserves learnings in a `## Progress` section within the PLAN.md file for the next run.
+
+**Planning is mandatory** - Ralph enforces that you properly understand and plan work before executing.
+
+## How It Works
+
+Ralph uses a **phase-by-phase workflow**. You don't plan everything upfront - you work through one phase at a time:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  ONE-TIME SETUP                                           │
+│                                                           │
+│  ralph init  →  ralph map  →  ralph roadmap               │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌───────────────────────────────────────────────────────────┐
+│  PER-PHASE LOOP (repeat for each phase)                   │
+│                                                           │
+│  ┌──────────┐     ┌──────────┐    ┌─────────┐    ┌─────┐  │
+│  │ discover │  →  │ discuss  │ →  │  plan   │ →  │ run │  │
+│  │(optional)│     │(optional)│    │         │    │     │  │
+│  └──────────┘     └──────────┘    └─────────┘    └─────┘  │
+│                                                           │
+│  Phase 1 → Phase 2 → Phase 3 → ... → Done                 │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
+
+         At any time: ralph status (see where you are)
+```
+
+## When to Use Ralph
+
+**Good for:**
+- Greenfield projects building from scratch
+- Major refactors with clear phases
+- Feature development with sequential steps
+- Any work that can be broken into verifiable tasks
+
+**Not for:**
+- Quick one-off changes (use Claude directly)
+- Exploratory work where scope is unclear
+- Work requiring constant human judgment
+- Debugging sessions or investigations
+
+## Ralph vs GSD
+
+| Component | Role |
+|-----------|------|
+| **GSD** | Planning brain - interactive workflows for project setup, roadmapping, and plan creation |
+| **Ralph** | Execution engine - autonomous execution with verification, looping, and progress tracking |
+
+Ralph wraps GSD commands in a simpler CLI (`ralph plan` calls `/gsd:plan-phase`, etc.) and adds:
+- Verification after each task
+- Autonomous looping across plans
+- Progress tracking via `ralph status`
+- Inactivity timeout protection
+
+You can use GSD directly within Claude Code for interactive planning, or use Ralph for automated execution.
+
+## Checking Progress: `ralph status`
+
+Run `ralph status` anytime to see your current position:
+
+```bash
+$ ralph status
+
+Ralph v2.0.0 - My Project
+
+📦 Project Artifacts:
+  ✓ PROJECT.md          Project vision and requirements
+  ✓ ROADMAP.md          10 phases defined
+  ✓ Codebase Maps       7 analysis documents
+  ✓ STATE.md            Tracking execution
+  ✓ Plans               3/10 phases have plans
+
+Progress: [████░░░░░░░░░░░░░░░░] 20% (4/20 plans)
+
+📍 Current Position:
+  Phase: 2 of 10
+  Plan:  01-02-PLAN.md
+  Status: Ready to execute
+
+🎯 Suggested Next Actions:
+  ralph run              Execute next incomplete plan
+  ralph run --loop 5     Execute up to 5 plans autonomously
+```
+
+Use `ralph status -v` (verbose) to see all phases and their plans:
+
+```bash
+$ ralph status -v
+...
+Phases:
+  ✓ Phase 1: Feature Verification (3/3)
+      ✓ 01-01-PLAN.md
+      ✓ 01-02-PLAN.md
+      ✓ 01-03-PLAN.md
+  ◐ Phase 2: Mix World Media (1/2)
+      ✓ 02-01-PLAN.md
+      ○ 02-02-PLAN.md
+  ○ Phase 3: Story Adaptation (0/0)
+  ...
+```
+
+Use `ralph list` for a compact view of all phases and plans.
 
 ## Installation
 
@@ -30,37 +145,82 @@ go install github.com/daydemir/ralph/cmd/ralph@latest
 ## Quick Start
 
 ```bash
-# 1. Initialize project (creates PROJECT.md)
-ralph init
+# One-time setup
+ralph init              # Create PROJECT.md
+ralph map               # Analyze existing codebase (brownfield projects)
+ralph roadmap           # Create ROADMAP.md with phases
 
-# 2. Map existing codebase (for brownfield projects)
-ralph map
-
-# 3. Create roadmap with phases
-ralph roadmap
-
-# 4. Create executable plans for Phase 1
-ralph plan 1
-
-# 5. Execute plans one at a time
-ralph run
-
-# 6. Or run autonomous loop
-ralph run --loop 5
+# Per-phase cycle
+ralph discover 1        # Research external APIs/docs (optional)
+ralph discuss 1         # Align on scope and approach (optional)
+ralph plan 1            # Create executable PLAN.md files
+ralph run               # Execute plans (or: ralph run --loop 5)
 ```
+
+## Workflow Example
+
+Here's a complete cycle for one phase:
+
+```bash
+# Phase 1: Authentication
+ralph discover 1        # → Creates .planning/phases/01-auth/RESEARCH.md
+                        #   Researches OAuth providers, JWT libraries, etc.
+
+ralph discuss 1         # → Creates .planning/phases/01-auth/CONTEXT.md
+                        #   Alignment conversation about scope, edge cases
+
+ralph plan 1            # → Creates .planning/phases/01-auth/01-01-PLAN.md, etc.
+                        #   Breaks phase into executable task files
+
+ralph run --loop        # Executes all plans for phase 1
+                        # STATE.md updates automatically
+
+# Phase 1 complete → now repeat for Phase 2
+ralph discover 2
+ralph discuss 2
+ralph plan 2
+ralph run --loop
+```
+
+## Pre-Planning: Discover vs Discuss
+
+Before planning a phase, you can optionally run **discover** and/or **discuss** to build context:
+
+| Command | Purpose | Output | When to Use |
+|---------|---------|--------|-------------|
+| `ralph discover N` | Research external docs, APIs, ecosystem options | `RESEARCH.md` | Unfamiliar domain, new libraries, API integrations |
+| `ralph discuss N` | Alignment conversation about scope/approach | `CONTEXT.md` | Complex decisions, unclear requirements, multiple approaches |
+
+**Guidelines:**
+- **Familiar domain?** Skip discover, maybe run discuss for alignment
+- **New technology?** Run discover to research options first
+- **Complex phase?** Run both - discover first, then discuss with that context
+- **Simple phase?** Skip both and go straight to `ralph plan`
+
+Both commands are optional but recommended for non-trivial phases. The context they generate helps `ralph plan` create better plans.
 
 ## Commands
 
-### Planning Commands
+### Setup Commands (One-Time)
 
 | Command | Description |
 |---------|-------------|
 | `ralph init` | Initialize project with GSD (creates PROJECT.md) |
 | `ralph roadmap` | Create phase breakdown (creates ROADMAP.md) |
 | `ralph map` | Analyze existing codebase structure |
-| `ralph discover [N]` | Research phase N before planning |
-| `ralph discuss [N]` | Discuss phase N approach |
-| `ralph plan [N]` | Create executable PLAN.md for phase N |
+
+### Pre-Planning Commands (Optional)
+
+| Command | Description |
+|---------|-------------|
+| `ralph discover [N]` | Research phase N - external docs, APIs, options → RESEARCH.md |
+| `ralph discuss [N]` | Discuss phase N - scope and approach alignment → CONTEXT.md |
+
+### Planning Commands
+
+| Command | Description |
+|---------|-------------|
+| `ralph plan [N]` | Create executable PLAN.md files for phase N |
 
 ### Execution Commands
 
@@ -68,8 +228,10 @@ ralph run --loop 5
 |---------|-------------|
 | `ralph run` | Execute the next incomplete plan |
 | `ralph run --loop [N]` | Autonomous loop up to N plans (default 10) |
-| `ralph status` | Show current position and progress |
-| `ralph list` | List all phases and plans |
+| `ralph run --model MODEL` | Use specific model (sonnet, opus, haiku) |
+| `ralph status` | Dashboard: current phase, progress, suggested actions |
+| `ralph status -v` | Verbose: show all phases and plans with completion status |
+| `ralph list` | Compact list of all phases and plans |
 
 ### Roadmap Modification
 
@@ -86,28 +248,34 @@ Ralph requires proper planning before execution. You can't skip steps:
 ```
 ralph init      → REQUIRED first (can't run anything without PROJECT.md)
 ralph roadmap   → REQUIRED (can't plan phases without ROADMAP.md)
+ralph discover  → optional (builds research context)
+ralph discuss   → optional (builds alignment context)
 ralph plan N    → REQUIRED (can't run without PLAN.md files)
 ralph run       → Only works if valid PLAN.md exists
 ```
 
-This ensures you understand the full scope before writing code.
+**Key principle:** Work through one phase at a time. Don't plan Phase 2 until Phase 1 is complete. STATE.md tracks your current position so you can resume anytime.
 
 ## Workspace Structure
 
-Ralph creates a `.planning/` directory:
+Ralph creates two directories:
 
 ```
-.planning/
+.ralph/
+└── config.yaml         # Ralph configuration (optional)
+
+.planning/              # Created by GSD
 ├── PROJECT.md          # Project vision and requirements
 ├── ROADMAP.md          # Phase breakdown
 ├── STATE.md            # Current position and progress
-├── config.json         # Configuration
 ├── codebase/           # Codebase analysis (from ralph map)
 │   ├── STACK.md
 │   ├── ARCHITECTURE.md
 │   └── ...
 └── phases/
     ├── 01-foundation/
+    │   ├── RESEARCH.md       # From ralph discover (optional)
+    │   ├── CONTEXT.md        # From ralph discuss (optional)
     │   ├── 01-01-PLAN.md
     │   ├── 01-01-SUMMARY.md
     │   └── 01-02-PLAN.md
@@ -130,14 +298,21 @@ Each PLAN.md contains tasks with verification commands:
 </task>
 ```
 
-Ralph runs verification after each task. If verification fails:
-- Retries once
-- If still fails, stops immediately
-- Reports exactly what failed
+Ralph runs verification after each task. If verification fails, execution stops immediately and reports what failed.
 
 ### Inactivity Timeout
 
 Ralph monitors for 60 minutes of **inactivity** (no output), not total duration. Long builds and tests are fine as long as there's activity.
+
+### Context Management
+
+Claude's context degrades after ~100K tokens. Ralph uses a hybrid approach:
+
+1. **Progress tracking**: Claude updates a `## Progress` section in each PLAN.md after completing tasks
+2. **Self-monitoring**: Claude is instructed to bail out gracefully at ~100K tokens
+3. **Safety net**: Ralph terminates at 120K tokens if Claude hasn't bailed out
+
+When context runs low, Ralph preserves learnings in the PLAN.md file so the next run can continue where it left off.
 
 ## Autonomous Loop
 
@@ -164,20 +339,46 @@ Iteration 2/5: 01-02-PLAN.md
 
 ## Configuration
 
-Edit `.planning/config.json`:
+Edit `.ralph/config.yaml`:
 
-```json
-{
-  "verification": {
-    "inactivity_timeout_minutes": 60,
-    "retry_on_failure": true
-  },
-  "claude": {
-    "model": "sonnet",
-    "binary": "claude"
-  }
-}
+```yaml
+llm:
+  backend: claude      # LLM backend to use
+  model: sonnet        # Model: sonnet, opus, or haiku
+
+claude:
+  binary: claude       # Path to Claude CLI binary
+  allowed_tools:       # Tools Claude can use during execution
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Glob
+    - Grep
+    - Task
+    - TodoWrite
+    - WebFetch
+    - WebSearch
+
+build:
+  default_loop_iterations: 10    # Default max iterations for --loop
+  signals:
+    iteration_complete: "###ITERATION_COMPLETE###"
+    ralph_complete: "###RALPH_COMPLETE###"
 ```
+
+Ralph uses sensible defaults if no config file exists.
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "GSD not installed" error | Run `npx get-shit-done-cc --global` to install GSD |
+| "No ROADMAP.md found" | Run `ralph init` then `ralph roadmap` first |
+| Plan execution fails | Run `ralph status -v` to see current state, check the PLAN.md file for issues, fix manually then retry |
+| "Context exceeded" errors | Plan may be too large - break the phase into smaller sub-phases |
+| Claude hangs or times out | Check network connection; Ralph has 60-minute inactivity timeout (not total time) |
+| Wrong phase executing | Check STATE.md in `.planning/` - manually edit if needed to reset position |
 
 ## Previous Version
 

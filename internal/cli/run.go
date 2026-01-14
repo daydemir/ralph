@@ -14,6 +14,7 @@ import (
 var (
 	runLoop       bool
 	runLoopCount  int
+	runModel      string
 )
 
 var runCmd = &cobra.Command{
@@ -78,6 +79,9 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 
 		// Create executor
 		config := executor.DefaultConfig(cwd)
+		if runModel != "" {
+			config.Model = runModel
+		}
 		exec := executor.New(config)
 
 		ctx := context.Background()
@@ -116,5 +120,6 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 func init() {
 	runCmd.Flags().BoolVar(&runLoop, "loop", false, "run autonomous loop")
 	runCmd.Flags().IntVarP(&runLoopCount, "count", "n", 10, "max iterations for loop mode")
+	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
 	rootCmd.AddCommand(runCmd)
 }

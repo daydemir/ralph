@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -174,11 +176,16 @@ func (g *GSD) DiscussPhase(ctx context.Context, phase int) error {
 }
 
 // PlanPhase runs /gsd:plan-phase N (requires ROADMAP.md)
+// After planning, syncs ROADMAP.md with actual plan names
 func (g *GSD) PlanPhase(ctx context.Context, phase int) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:plan-phase %d", phase))
+	if err := g.RunCommand(ctx, fmt.Sprintf("/gsd:plan-phase %d", phase)); err != nil {
+		return err
+	}
+	// Sync ROADMAP.md with actual plan files
+	return g.SyncRoadmap(phase)
 }
 
 // AddPhase runs /gsd:add-phase "description" (requires ROADMAP.md)
@@ -218,4 +225,139 @@ To fix, add to your ~/.zshrc or ~/.bashrc:
 
 Then restart your terminal, or run:
   source ~/.zshrc`)
+}
+
+// SyncRoadmap updates ROADMAP.md to reflect actual plan files created
+func (g *GSD) SyncRoadmap(phase int) error {
+	roadmapPath := filepath.Join(g.PlanningDir(), "ROADMAP.md")
+
+	// Read current ROADMAP.md
+	content, err := os.ReadFile(roadmapPath)
+	if err != nil {
+		return fmt.Errorf("cannot read ROADMAP.md: %w", err)
+	}
+
+	// Get actual plan files for this phase
+	phasesDir := filepath.Join(g.PlanningDir(), "phases")
+	entries, err := os.ReadDir(phasesDir)
+	if err != nil {
+		return nil // No phases directory yet
+	}
+
+	// Find the phase directory
+	var phaseDir string
+	phasePrefix := fmt.Sprintf("%02d", phase)
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), phasePrefix) {
+			phaseDir = filepath.Join(phasesDir, entry.Name())
+			break
+		}
+	}
+
+	if phaseDir == "" {
+		return nil // Phase directory not found
+	}
+
+	// Read plan files
+	planEntries, err := os.ReadDir(phaseDir)
+	if err != nil {
+		return nil
+	}
+
+	// Extract plan names from files
+	type planInfo struct {
+		number int
+		title  string
+	}
+	var plans []planInfo
+
+	for _, entry := range planEntries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, "-PLAN.md") {
+			continue
+		}
+
+		// Read plan file to get title
+		planPath := filepath.Join(phaseDir, name)
+		planContent, err := os.ReadFile(planPath)
+		if err != nil {
+			continue
+		}
+
+		// Extract plan number (e.g., "01-02-PLAN.md" -> 2)
+		planNum := 0
+		parts := strings.Split(strings.TrimSuffix(name, "-PLAN.md"), "-")
+		if len(parts) >= 2 {
+			planNum, _ = strconv.Atoi(parts[1])
+		}
+
+		// Extract title from first heading
+		lines := strings.Split(string(planContent), "\n")
+		title := "Plan"
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# ") {
+				title = strings.TrimPrefix(line, "# ")
+				// Remove common suffixes
+				title = strings.TrimSuffix(title, " Plan")
+				break
+			}
+		}
+
+		plans = append(plans, planInfo{number: planNum, title: title})
+	}
+
+	if len(plans) == 0 {
+		return nil // No plans to sync
+	}
+
+	// Sort by plan number
+	sort.Slice(plans, func(i, j int) bool {
+		return plans[i].number < plans[j].number
+	})
+
+	// Update ROADMAP.md content
+	lines := strings.Split(string(content), "\n")
+	inPhase := false
+	phaseMarker := fmt.Sprintf("## Phase %d", phase)
+	nextPhaseMarker := fmt.Sprintf("## Phase %d", phase+1)
+
+	var newLines []string
+	planIndex := 0
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check if we're entering the target phase
+		if strings.HasPrefix(trimmed, phaseMarker) {
+			inPhase = true
+			newLines = append(newLines, line)
+			continue
+		}
+
+		// Check if we're leaving the target phase
+		if inPhase && (strings.HasPrefix(trimmed, nextPhaseMarker) || (strings.HasPrefix(trimmed, "## Phase") && !strings.HasPrefix(trimmed, phaseMarker))) {
+			inPhase = false
+		}
+
+		// Replace plan lines within the phase
+		if inPhase && strings.HasPrefix(trimmed, fmt.Sprintf("%02d-%02d:", phase, 1)) {
+			// Skip old plan lines - we'll add new ones
+			continue
+		}
+
+		// If we're at the end of the phase section, add actual plans
+		if inPhase && (trimmed == "" || strings.HasPrefix(trimmed, "## Phase")) && planIndex == 0 && len(plans) > 0 {
+			// Insert actual plan entries
+			for _, p := range plans {
+				newLines = append(newLines, fmt.Sprintf("  %02d-%02d: %s", phase, p.number, p.title))
+			}
+			planIndex = len(plans) // Mark as inserted
+		}
+
+		newLines = append(newLines, line)
+	}
+
+	// Write updated ROADMAP.md
+	return os.WriteFile(roadmapPath, []byte(strings.Join(newLines, "\n")), 0644)
 }

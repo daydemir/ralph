@@ -67,13 +67,14 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	cyan := color.New(color.FgCyan).SprintFunc()
 	green := color.New(color.FgGreen).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
 
 	fmt.Printf("[%s] Executing: %s\n", time.Now().Format("15:04:05"), cyan(plan.Name))
 
 	// Build the execution prompt
 	prompt := e.buildExecutionPrompt(plan.Path)
 
-	// Execute with Claude
+	// Execute with Claude using streaming mode
 	opts := llm.ExecuteOptions{
 		Prompt: prompt,
 		ContextFiles: []string{
@@ -89,14 +90,45 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		WorkDir: e.config.WorkDir,
 	}
 
-	// Run Claude in interactive mode (passes through stdin/stdout)
-	err := e.claude.ExecuteInteractive(ctx, opts)
+	// Run Claude in streaming mode to capture output and signals
+	reader, err := e.claude.Execute(ctx, opts)
 	if err != nil {
 		result.Error = fmt.Errorf("execution failed: %w", err)
 		fmt.Printf("[%s] %s Execution failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
-	} else {
+		result.Duration = time.Since(start)
+		return result
+	}
+	defer reader.Close()
+
+	// Parse the stream output
+	handler := llm.NewConsoleHandler()
+	if err := llm.ParseStream(reader, handler); err != nil {
+		result.Error = fmt.Errorf("stream parsing failed: %w", err)
+		fmt.Printf("[%s] %s Stream parsing failed: %v\n", time.Now().Format("15:04:05"), red("✗"), err)
+		result.Duration = time.Since(start)
+		return result
+	}
+
+	// Check for proper completion
+	tokenStats := handler.GetTokenStats()
+	fmt.Printf("[%s] Tokens used: %d (input: %d, output: %d)\n",
+		time.Now().Format("15:04:05"), tokenStats.TotalTokens, tokenStats.InputTokens, tokenStats.OutputTokens)
+
+	if handler.HasFailed() {
+		failure := handler.GetFailure()
+		result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
+		result.TasksFailed = []string{failure.Detail}
+		fmt.Printf("[%s] %s %s: %s\n", time.Now().Format("15:04:05"), red("✗"), failure.Type, failure.Detail)
+	} else if handler.IsPlanComplete() {
 		result.Success = true
 		fmt.Printf("[%s] %s Plan complete!\n", time.Now().Format("15:04:05"), green("✓"))
+	} else if handler.ShouldBailOut() {
+		result.Error = fmt.Errorf("token limit reached: %d tokens", tokenStats.TotalTokens)
+		fmt.Printf("[%s] %s Token limit bailout at %d tokens\n", time.Now().Format("15:04:05"), yellow("⚠"), tokenStats.TotalTokens)
+	} else {
+		// Claude exited without signaling - treat as incomplete, not failure
+		fmt.Printf("[%s] %s Claude exited without completion signal\n", time.Now().Format("15:04:05"), yellow("⚠"))
+		fmt.Println("   Plan may be incomplete. Run 'ralph run' to continue.")
 	}
 
 	result.Duration = time.Since(start)
@@ -161,27 +193,60 @@ func (e *Executor) buildExecutionPrompt(planPath string) string {
 
 1. Read the PLAN.md file carefully
 2. Execute each task in order
-3. After each task:
+3. **CRITICAL: After each task, update the PLAN.md file's Progress section**
+4. After each task:
    - Run the <verify> command if present
    - If verification fails, try to fix the issue once
    - If still fails, signal failure and stop
-4. Create atomic git commits after each task:
+5. Create atomic git commits after each task:
    git commit -m "{type}({phase}-{plan}): {task_name}"
-5. After ALL tasks complete:
+6. After ALL tasks complete:
    - Run all checks in <verification> section
    - Create SUMMARY.md in the phase directory
    - Signal: ###PLAN_COMPLETE###
 
+## Progress Tracking (MANDATORY)
+
+After completing each task, add/update a ## Progress section at the end of the PLAN.md file:
+
+` + "```" + `markdown
+## Progress
+- Task 1: [COMPLETE] - What was done, verification passed
+- Task 2: [IN_PROGRESS] - Current state, any blockers
+- Task 3: [PENDING]
+` + "```" + `
+
+This ensures the next run can continue where you left off if context runs low.
+
+## Context Management (CRITICAL)
+
+You have ~200K tokens of context. Quality degrades significantly after ~100K tokens.
+Ralph is monitoring your token usage and will terminate at 120K tokens as a safety net.
+
+**Self-monitoring heuristics:**
+- Count your tool calls: if > 50 tool calls without task completion, you're burning context
+- Watch for repeated errors: 3+ retries of same fix = stuck, bail out
+- File reading volume: if you've read > 20 files without progress, context is bloated
+
+**At ~100K tokens, proactively bail out:**
+1. Update the PLAN.md Progress section with current state
+2. Document what worked, what failed, and next steps
+3. Signal: ###BAILOUT:context_preservation###
+
 ## Failure Signals
+- ###PLAN_COMPLETE### - All tasks done and verified
 - ###TASK_FAILED:{name}### - A task couldn't be completed
 - ###PLAN_FAILED:{check}### - Plan verification failed
 - ###BLOCKED:{reason}### - Need human intervention
+- ###BAILOUT:{reason}### - Preserving context, update Progress first
 
 ## Rules
 - NO placeholders or stub implementations
 - NO skipping verification
 - NO continuing after failure
+- ALWAYS update Progress section after each task
 - If uncertain, signal: ###BLOCKED:uncertain###
+- If burning context without progress, signal: ###BAILOUT:context_preservation###
 
 Begin execution now.`, planPath)
 }
