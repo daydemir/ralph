@@ -10,10 +10,42 @@ import (
 	"github.com/daydemir/ralph/internal/display"
 )
 
+// SignalType represents the type of failure signal from Claude's output
+type SignalType string
+
+const (
+	SignalTaskFailed  SignalType = "task_failed"
+	SignalPlanFailed  SignalType = "plan_failed"
+	SignalBlocked     SignalType = "blocked"
+	SignalBailout     SignalType = "bailout"
+	SignalBuildFailed SignalType = "build_failed"
+	SignalTestFailed  SignalType = "test_failed"
+)
+
+// ValidSignalTypes is the exhaustive list of allowed signal types
+var ValidSignalTypes = []SignalType{
+	SignalTaskFailed,
+	SignalPlanFailed,
+	SignalBlocked,
+	SignalBailout,
+	SignalBuildFailed,
+	SignalTestFailed,
+}
+
+// IsValid checks if a signal type is valid
+func (t SignalType) IsValid() bool {
+	for _, valid := range ValidSignalTypes {
+		if t == valid {
+			return true
+		}
+	}
+	return false
+}
+
 // FailureSignal represents a detected failure in Claude's output
 type FailureSignal struct {
-	Type   string // "task_failed", "plan_failed", "blocked", "bailout", "build_failed", "test_failed"
-	Detail string // The specific name/reason from the signal
+	Type   SignalType // The type of failure signal
+	Detail string     // The specific name/reason from the signal
 }
 
 // TokenStats tracks token usage during execution
@@ -163,7 +195,7 @@ func (h *ConsoleHandler) IsRalphComplete() bool {
 
 func (h *ConsoleHandler) OnFailure(signal FailureSignal) {
 	// BAILOUT is a soft signal for context preservation, not a hard failure
-	if signal.Type == "bailout" {
+	if signal.Type == SignalBailout {
 		h.bailoutSignal = &signal
 	} else {
 		h.failure = &signal
@@ -283,35 +315,35 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 						// Check for failure/termination signals
 						// When detected, notify handler and terminate the Claude process immediately
 						if match := taskFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
-							handler.OnFailure(FailureSignal{Type: "task_failed", Detail: strings.TrimSpace(match[1])})
+							handler.OnFailure(FailureSignal{Type: SignalTaskFailed, Detail: strings.TrimSpace(match[1])})
 							if onTerminate != nil {
 								onTerminate()
 							}
 							return nil
 						}
 						if match := planFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
-							handler.OnFailure(FailureSignal{Type: "plan_failed", Detail: strings.TrimSpace(match[1])})
+							handler.OnFailure(FailureSignal{Type: SignalPlanFailed, Detail: strings.TrimSpace(match[1])})
 							if onTerminate != nil {
 								onTerminate()
 							}
 							return nil
 						}
 						if match := blockedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
-							handler.OnFailure(FailureSignal{Type: "blocked", Detail: strings.TrimSpace(match[1])})
+							handler.OnFailure(FailureSignal{Type: SignalBlocked, Detail: strings.TrimSpace(match[1])})
 							if onTerminate != nil {
 								onTerminate()
 							}
 							return nil
 						}
 						if match := bailoutPattern.FindStringSubmatch(content.Text); len(match) > 1 {
-							handler.OnFailure(FailureSignal{Type: "bailout", Detail: strings.TrimSpace(match[1])})
+							handler.OnFailure(FailureSignal{Type: SignalBailout, Detail: strings.TrimSpace(match[1])})
 							if onTerminate != nil {
 								onTerminate()
 							}
 							return nil
 						}
 						if match := buildFailedPattern.FindStringSubmatch(content.Text); len(match) > 1 {
-							handler.OnFailure(FailureSignal{Type: "build_failed", Detail: strings.TrimSpace(match[1])})
+							handler.OnFailure(FailureSignal{Type: SignalBuildFailed, Detail: strings.TrimSpace(match[1])})
 							if onTerminate != nil {
 								onTerminate()
 							}
@@ -322,7 +354,7 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 							if len(match) > 2 && match[2] != "" {
 								detail = detail + ":" + strings.TrimSpace(match[2])
 							}
-							handler.OnFailure(FailureSignal{Type: "test_failed", Detail: detail})
+							handler.OnFailure(FailureSignal{Type: SignalTestFailed, Detail: detail})
 							if onTerminate != nil {
 								onTerminate()
 							}
@@ -337,35 +369,35 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 			// Check for failure/termination signals in result events too
 			// These can appear when Claude outputs them in its final message
 			if match := taskFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
-				handler.OnFailure(FailureSignal{Type: "task_failed", Detail: strings.TrimSpace(match[1])})
+				handler.OnFailure(FailureSignal{Type: SignalTaskFailed, Detail: strings.TrimSpace(match[1])})
 				if onTerminate != nil {
 					onTerminate()
 				}
 				return nil
 			}
 			if match := planFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
-				handler.OnFailure(FailureSignal{Type: "plan_failed", Detail: strings.TrimSpace(match[1])})
+				handler.OnFailure(FailureSignal{Type: SignalPlanFailed, Detail: strings.TrimSpace(match[1])})
 				if onTerminate != nil {
 					onTerminate()
 				}
 				return nil
 			}
 			if match := blockedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
-				handler.OnFailure(FailureSignal{Type: "blocked", Detail: strings.TrimSpace(match[1])})
+				handler.OnFailure(FailureSignal{Type: SignalBlocked, Detail: strings.TrimSpace(match[1])})
 				if onTerminate != nil {
 					onTerminate()
 				}
 				return nil
 			}
 			if match := bailoutPattern.FindStringSubmatch(event.Result); len(match) > 1 {
-				handler.OnFailure(FailureSignal{Type: "bailout", Detail: strings.TrimSpace(match[1])})
+				handler.OnFailure(FailureSignal{Type: SignalBailout, Detail: strings.TrimSpace(match[1])})
 				if onTerminate != nil {
 					onTerminate()
 				}
 				return nil
 			}
 			if match := buildFailedPattern.FindStringSubmatch(event.Result); len(match) > 1 {
-				handler.OnFailure(FailureSignal{Type: "build_failed", Detail: strings.TrimSpace(match[1])})
+				handler.OnFailure(FailureSignal{Type: SignalBuildFailed, Detail: strings.TrimSpace(match[1])})
 				if onTerminate != nil {
 					onTerminate()
 				}
@@ -376,7 +408,7 @@ func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) er
 				if len(match) > 2 && match[2] != "" {
 					detail = detail + ":" + strings.TrimSpace(match[2])
 				}
-				handler.OnFailure(FailureSignal{Type: "test_failed", Detail: detail})
+				handler.OnFailure(FailureSignal{Type: SignalTestFailed, Detail: detail})
 				if onTerminate != nil {
 					onTerminate()
 				}

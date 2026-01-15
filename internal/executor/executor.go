@@ -118,6 +118,20 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		return e.ExecuteManualPlanInteractive(ctx, phase, plan, start)
 	}
 
+	// Validate task types in the plan before execution
+	planContent, err := os.ReadFile(plan.Path)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to read plan: %w", err)
+		result.FailureType = FailureHard
+		return result
+	}
+	if err := ValidatePlanTasks(string(planContent)); err != nil {
+		result.Error = fmt.Errorf("plan validation failed: %w", err)
+		result.FailureType = FailureHard
+		e.display.Error(fmt.Sprintf("Invalid task type in plan: %v", err))
+		return result
+	}
+
 	// Show execution start in a Ralph box
 	e.display.RalphBox("RALPH",
 		fmt.Sprintf("Executing: %s", plan.Name),
@@ -178,7 +192,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		failure := handler.GetFailure()
 
 		// For blocker failures, verify the claim before accepting it as hard failure
-		if failure.Type == "blocked" {
+		if failure.Type == llm.SignalBlocked {
 			blockerResult := e.RunBlockerAnalysis(ctx, failure, plan)
 			if blockerResult.Error != nil {
 				e.display.Warning(fmt.Sprintf("Blocker analysis failed: %v", blockerResult.Error))
@@ -995,10 +1009,8 @@ func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *state.Phas
 		}
 	}
 
-	// Check for manual checkpoint in last output
-	if strings.Contains(result.LastOutput, "MANUAL CHECKPOINT") ||
-		strings.Contains(result.LastOutput, "type=\"manual\"") ||
-		strings.Contains(result.LastOutput, "checkpoint:human-action") {
+	// Check for manual checkpoint in last output using TaskType enum
+	if containsHumanActionTask(result.LastOutput) {
 		return &SoftFailureAnalysisResult{
 			Decision: RetryWithGuidance,
 			Reason:   "Hit manual checkpoint - will skip on retry",
@@ -1282,9 +1294,10 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 		return false, nil
 	}
 
-	// Scan all plans in this phase for manual and checkpoint:human-action tasks
+	// Scan all plans in this phase for tasks that require human action
 	var manualTasks []ManualTask
-	manualPattern := regexp.MustCompile(`(?s)<task\s+type="(?:manual|checkpoint:human-action)"[^>]*>(.*?)</task>`)
+	// Match task with type attribute for extraction
+	taskWithTypePattern := regexp.MustCompile(`(?s)(<task\s+[^>]*>)(.*?)(</task>)`)
 
 	for _, plan := range phase.Plans {
 		content, err := os.ReadFile(plan.Path)
@@ -1292,16 +1305,31 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 			continue
 		}
 
-		matches := manualPattern.FindAllStringSubmatch(string(content), -1)
+		// Find all tasks and check their types using the TaskType enum
+		matches := taskWithTypePattern.FindAllStringSubmatch(string(content), -1)
 		for i, match := range matches {
-			if len(match) > 1 {
-				manualTasks = append(manualTasks, ManualTask{
-					PlanNumber:  plan.Number,
-					PlanName:    plan.Name,
-					PlanPath:    plan.Path,
-					TaskName:    fmt.Sprintf("Manual Task %d", i+1),
-					TaskContent: strings.TrimSpace(match[1]),
-				})
+			if len(match) > 3 {
+				taskOpenTag := match[1]  // <task type="...">
+				taskContent := match[2]  // task content
+
+				// Extract and validate task type
+				taskType, err := ExtractTaskType(taskOpenTag)
+				if err != nil {
+					// Log invalid task type but continue
+					e.display.Warning(fmt.Sprintf("Invalid task type in %s: %v", plan.Name, err))
+					continue
+				}
+
+				// Only bundle tasks that require human action
+				if taskType.RequiresHumanAction() {
+					manualTasks = append(manualTasks, ManualTask{
+						PlanNumber:  plan.Number,
+						PlanName:    plan.Name,
+						PlanPath:    plan.Path,
+						TaskName:    fmt.Sprintf("Manual Task %d", i+1),
+						TaskContent: strings.TrimSpace(taskContent),
+					})
+				}
 			}
 		}
 	}

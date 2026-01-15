@@ -7,59 +7,62 @@ import (
 
 func TestSignalDetection(t *testing.T) {
 	testCases := []struct {
-		name       string
-		eventType  string // "assistant" or "result"
-		content    string
-		wantSignal string
-		wantDetail string
+		name           string
+		eventType      string     // "assistant" or "result"
+		content        string
+		wantSignal     SignalType // empty string for plan_complete, SignalBailout for bailout, others for failure
+		isPlanComplete bool       // true if wantSignal is plan_complete
+		isBailout      bool       // true if wantSignal is bailout
+		wantDetail     string
 	}{
 		// Text events (assistant type)
 		{
-			name:       "PLAN_COMPLETE in text",
-			eventType:  "assistant",
-			content:    "Done! ###PLAN_COMPLETE###",
-			wantSignal: "plan_complete",
+			name:           "PLAN_COMPLETE in text",
+			eventType:      "assistant",
+			content:        "Done! ###PLAN_COMPLETE###",
+			isPlanComplete: true,
 		},
 		{
 			name:       "BAILOUT in text",
 			eventType:  "assistant",
 			content:    "###BAILOUT:context_preservation###",
-			wantSignal: "bailout",
+			wantSignal: SignalBailout,
+			isBailout:  true,
 			wantDetail: "context_preservation",
 		},
 		{
 			name:       "PLAN_FAILED in text",
 			eventType:  "assistant",
 			content:    "###PLAN_FAILED:test_infrastructure###",
-			wantSignal: "plan_failed",
+			wantSignal: SignalPlanFailed,
 			wantDetail: "test_infrastructure",
 		},
 		{
 			name:       "TASK_FAILED in text",
 			eventType:  "assistant",
 			content:    "###TASK_FAILED:build_ios###",
-			wantSignal: "task_failed",
+			wantSignal: SignalTaskFailed,
 			wantDetail: "build_ios",
 		},
 		{
 			name:       "BLOCKED in text",
 			eventType:  "assistant",
 			content:    "###BLOCKED:missing_credentials###",
-			wantSignal: "blocked",
+			wantSignal: SignalBlocked,
 			wantDetail: "missing_credentials",
 		},
 		{
 			name:       "BUILD_FAILED in text",
 			eventType:  "assistant",
 			content:    "###BUILD_FAILED:ios###",
-			wantSignal: "build_failed",
+			wantSignal: SignalBuildFailed,
 			wantDetail: "ios",
 		},
 		{
 			name:       "TEST_FAILED in text",
 			eventType:  "assistant",
 			content:    "###TEST_FAILED:ios:3###",
-			wantSignal: "test_failed",
+			wantSignal: SignalTestFailed,
 			wantDetail: "ios:3",
 		},
 		// Result events - CRITICAL (these were broken before the fix)
@@ -67,42 +70,43 @@ func TestSignalDetection(t *testing.T) {
 			name:       "PLAN_FAILED in result",
 			eventType:  "result",
 			content:    "Tests failed ###PLAN_FAILED:test_infrastructure### Summary...",
-			wantSignal: "plan_failed",
+			wantSignal: SignalPlanFailed,
 			wantDetail: "test_infrastructure",
 		},
 		{
 			name:       "BAILOUT in result",
 			eventType:  "result",
 			content:    "###BAILOUT:context_preservation### preserving work",
-			wantSignal: "bailout",
+			wantSignal: SignalBailout,
+			isBailout:  true,
 			wantDetail: "context_preservation",
 		},
 		{
 			name:       "TEST_FAILED in result",
 			eventType:  "result",
 			content:    "###TEST_FAILED:ios:3###",
-			wantSignal: "test_failed",
+			wantSignal: SignalTestFailed,
 			wantDetail: "ios:3",
 		},
 		{
 			name:       "TASK_FAILED in result",
 			eventType:  "result",
 			content:    "Build failed ###TASK_FAILED:compile_error### see log",
-			wantSignal: "task_failed",
+			wantSignal: SignalTaskFailed,
 			wantDetail: "compile_error",
 		},
 		{
 			name:       "BLOCKED in result",
 			eventType:  "result",
 			content:    "###BLOCKED:api_down###",
-			wantSignal: "blocked",
+			wantSignal: SignalBlocked,
 			wantDetail: "api_down",
 		},
 		{
 			name:       "BUILD_FAILED in result",
 			eventType:  "result",
 			content:    "###BUILD_FAILED:backend###",
-			wantSignal: "build_failed",
+			wantSignal: SignalBuildFailed,
 			wantDetail: "backend",
 		},
 	}
@@ -123,11 +127,11 @@ func TestSignalDetection(t *testing.T) {
 			ParseStream(reader, handler, nil)
 
 			// Check signal was detected
-			if tc.wantSignal == "plan_complete" {
+			if tc.isPlanComplete {
 				if !handler.IsPlanComplete() {
 					t.Errorf("Expected plan_complete signal to be detected")
 				}
-			} else if tc.wantSignal == "bailout" {
+			} else if tc.isBailout {
 				if !handler.IsBailout() {
 					t.Errorf("Expected bailout signal to be detected")
 				}
