@@ -35,7 +35,7 @@ type Phase struct {
 
 // Plan represents a PLAN.md file
 type Plan struct {
-	Number      int
+	Number      string // String to support decimal plan numbers like "5.1"
 	Name        string
 	Path        string
 	IsCompleted bool // Has corresponding SUMMARY.md
@@ -166,10 +166,10 @@ func loadPlans(phaseDir string) ([]Plan, error) {
 			Path: filepath.Join(phaseDir, name),
 		}
 
-		// Extract plan number (e.g., "01-02-PLAN.md" -> 2)
-		re := regexp.MustCompile(`-(\d+)-PLAN\.md$`)
+		// Extract plan number (e.g., "01-02-PLAN.md" -> "2", "01-05.1-PLAN.md" -> "5.1")
+		re := regexp.MustCompile(`-(\d+(?:\.\d+)?)-PLAN\.md$`)
 		if matches := re.FindStringSubmatch(name); len(matches) >= 2 {
-			plan.Number, _ = strconv.Atoi(matches[1])
+			plan.Number = matches[1]
 		}
 
 		// Check if SUMMARY.md exists (plan completed)
@@ -182,9 +182,11 @@ func loadPlans(phaseDir string) ([]Plan, error) {
 		plans = append(plans, plan)
 	}
 
-	// Sort by plan number
+	// Sort by plan number (handles decimals like "5.1")
 	sort.Slice(plans, func(i, j int) bool {
-		return plans[i].Number < plans[j].Number
+		ni, _ := strconv.ParseFloat(plans[i].Number, 64)
+		nj, _ := strconv.ParseFloat(plans[j].Number, 64)
+		return ni < nj
 	})
 
 	return plans, nil
@@ -210,7 +212,8 @@ func CountPlans(phases []Phase) (total, completed int) {
 	for _, phase := range phases {
 		for _, plan := range phase.Plans {
 			// Skip special plans (decisions XX-00 and verification XX-99+)
-			if plan.Number == 0 || plan.Number >= 99 {
+			num, _ := strconv.ParseFloat(plan.Number, 64)
+			if num == 0 || num >= 99 {
 				continue
 			}
 			total++
@@ -239,13 +242,13 @@ func UpdateStateFile(planningDir string, phases []Phase) error {
 		percentage = (completed * 100) / total
 	}
 
-	// Build completion list (e.g., "01-01, 01-02, 01-03")
+	// Build completion list (e.g., "01-01, 01-02, 01-05.1")
 	var completedList []string
 	for _, phase := range phases {
 		for _, plan := range phase.Plans {
 			if plan.IsCompleted {
 				completedList = append(completedList,
-					fmt.Sprintf("%02d-%02d", phase.Number, plan.Number))
+					fmt.Sprintf("%02d-%s", phase.Number, plan.Number))
 			}
 		}
 	}
@@ -263,7 +266,7 @@ func UpdateStateFile(planningDir string, phases []Phase) error {
 	nextPhase, nextPlan := FindNextPlan(phases)
 	var statusLine string
 	if nextPlan != nil {
-		statusLine = fmt.Sprintf("Status: In progress - ready for %02d-%02d",
+		statusLine = fmt.Sprintf("Status: In progress - ready for %02d-%s",
 			nextPhase.Number, nextPlan.Number)
 	} else {
 		statusLine = "Status: All plans complete"
@@ -320,7 +323,7 @@ func UpdateRoadmap(planningDir string, phases []Phase) error {
 	// 1. Update plan checkboxes (- [ ] XX-YY: → - [x] XX-YY: ✅)
 	for _, phase := range phases {
 		for _, plan := range phase.Plans {
-			planId := fmt.Sprintf("%02d-%02d", phase.Number, plan.Number)
+			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
 			if plan.IsCompleted {
 				// Match patterns like "- [ ] 01-01:" and replace with "- [x] 01-01: ... ✅"
 				pattern := regexp.MustCompile(`- \[ \] ` + planId + `:([^\n]+)`)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/daydemir/ralph/internal/display"
@@ -480,7 +481,7 @@ func FilterBySeverity(observations []Observation, minSeverity string) []Observat
 
 // CheckpointVerification represents a checkpoint that needs human verification
 type CheckpointVerification struct {
-	PlanNumber     int
+	PlanNumber     string   // String to support decimal plan numbers like "5.1"
 	PlanName       string
 	PlanPath       string
 	CheckpointName string
@@ -541,7 +542,8 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
 	for _, plan := range phase.Plans {
 		// Skip special plans (decisions and verification)
-		if plan.Number == 0 || plan.Number >= 99 {
+		num, _ := strconv.ParseFloat(plan.Number, 64)
+		if num == 0 || num >= 99 {
 			continue
 		}
 		if !plan.IsCompleted {
@@ -613,7 +615,7 @@ This is the final quality gate before the phase is considered complete.
 	for i, v := range verifications {
 		content.WriteString(fmt.Sprintf(`### %d. %s
 
-**From plan:** %s (Plan %02d-%02d)
+**From plan:** %s (Plan %02d-%s)
 `, i+1, v.CheckpointName, v.PlanName, phase.Number, v.PlanNumber))
 
 		if v.AutomatedTest != "" {

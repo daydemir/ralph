@@ -107,7 +107,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	// Show execution start in a Ralph box
 	e.display.RalphBox("RALPH",
 		fmt.Sprintf("Executing: %s", plan.Name),
-		fmt.Sprintf("Phase %d, Plan %d", phase.Number, plan.Number))
+		fmt.Sprintf("Phase %d, Plan %s", phase.Number, plan.Number))
 
 	// Build the execution prompt
 	prompt := e.buildExecutionPrompt(plan.Path)
@@ -192,7 +192,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			}
 
 			// Commit and push all repos
-			planId := fmt.Sprintf("%02d-%02d", phase.Number, plan.Number)
+			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
 			e.CommitAndPushRepos(planId)
 		}
 	} else if handler.IsBailout() {
@@ -251,6 +251,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	var lastPhaseNumber int = -1
 	var lastPlanPath string
 	var lastProgressContent string
+	softFailedPlans := make(map[string]bool) // Track plans that soft-failed to skip them
 
 	for i := 1; i <= maxIterations; i++ {
 		// Reload phases to get current state
@@ -261,6 +262,18 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 
 		// Find next plan
 		phase, plan := state.FindNextPlan(phases)
+		if plan == nil {
+			e.display.AllComplete()
+			return nil
+		}
+
+		// Skip plans that previously soft-failed (e.g., manual checkpoints)
+		for plan != nil && softFailedPlans[plan.Path] {
+			e.display.Info("Skipping", fmt.Sprintf("%s (soft-failed previously, moving to next)", plan.Name))
+			// Mark as completed temporarily to find next plan
+			plan.IsCompleted = true
+			phase, plan = state.FindNextPlan(phases)
+		}
 		if plan == nil {
 			e.display.AllComplete()
 			return nil
@@ -320,8 +333,9 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				e.display.LoopFailed(plan.Name, result.Error, completed)
 				return result.Error
 			}
-			// Soft failure - warn but continue to next plan
-			e.display.Warning(fmt.Sprintf("%s (soft failure, continuing to next plan)", plan.Name))
+			// Soft failure - track it so we skip on next iteration
+			softFailedPlans[plan.Path] = true
+			e.display.Warning(fmt.Sprintf("%s (soft failure, will skip on next iteration)", plan.Name))
 			if result.Error != nil {
 				fmt.Printf("   Warning: %v\n", result.Error)
 			}
@@ -866,7 +880,7 @@ func resolveBinaryPath(name string) string {
 
 // DecisionCheckpoint represents a checkpoint:decision extracted from a plan
 type DecisionCheckpoint struct {
-	PlanNumber  int
+	PlanNumber  string // String to support decimal plan numbers like "5.1"
 	PlanName    string
 	PlanPath    string
 	TaskContent string
@@ -948,7 +962,7 @@ These decisions will be referenced by subsequent plans via STATE.md.
 
 	// Write each decision
 	for i, d := range decisions {
-		affectedPlans := fmt.Sprintf("%02d-%02d", phase.Number, d.PlanNumber)
+		affectedPlans := fmt.Sprintf("%02d-%s", phase.Number, d.PlanNumber)
 		content.WriteString(fmt.Sprintf(`### Decision %d: From Plan %s
 
 **Original plan:** %s
