@@ -353,6 +353,43 @@ Iteration 2/5: 01-02-PLAN.md
 ...
 ```
 
+### Retry Behavior
+
+When a plan exits unexpectedly (soft failure), Ralph will automatically retry:
+- **Default retries:** Same as `--loop` count (e.g., `--loop 20` = 20 retries per plan)
+- **Override:** Use `--max-retries N` to set a specific limit
+
+```bash
+ralph run --loop 20                    # 20 iterations, 20 retries per plan
+ralph run --loop 20 --max-retries 3    # 20 iterations, max 3 retries per plan
+```
+
+On retry, Ralph:
+1. Analyzes what happened (checks Progress section, SUMMARY.md existence)
+2. Provides context about previous attempts to Claude
+3. Instructs Claude to log progress before each action (to capture state if interrupted again)
+
+### Manual Checkpoints
+
+Plans can contain manual tasks (`type="manual"`) that require human action (e.g., adding files in Xcode, clicking through UI flows). Ralph handles these automatically:
+
+1. **At phase start:** Ralph scans all plans and bundles manual tasks into `XX-99-manual-PLAN.md`
+2. **During execution:** Claude skips manual tasks and records them as observations
+3. **At phase end:** The manual plan runs last, presenting all human tasks in one place
+
+This keeps automation flowing while collecting human work for batch completion.
+
+**Example manual task bundling:**
+```
+Phase 2 has plans: 02-01, 02-02, 02-03 (with 2 manual tasks), 02-04
+
+Ralph creates:
+- 02-00-decisions-PLAN.md (runs first, if decisions exist)
+- 02-99-manual-PLAN.md (runs last, contains the 2 manual tasks)
+
+Execution order: 02-00 → 02-01 → 02-02 → 02-03 → 02-04 → 02-99
+```
+
 ## Post-Plan Analysis
 
 After each plan completes, Ralph runs an **analysis agent** that reviews discoveries and can adjust subsequent plans.

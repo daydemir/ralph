@@ -17,6 +17,7 @@ var (
 	runLoopStr      string
 	runModel        string
 	runSkipAnalysis bool
+	maxRetries      int
 )
 
 var runCmd = &cobra.Command{
@@ -86,6 +87,16 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 		if runModel != "" {
 			config.Model = runModel
 		}
+		if maxRetries > 0 {
+			config.MaxRetries = maxRetries
+		} else if runLoopStr != "" {
+			// Default max-retries to same as loop value if not specified
+			if n, err := strconv.Atoi(runLoopStr); err == nil && n > 0 {
+				config.MaxRetries = n
+			} else {
+				config.MaxRetries = 10 // Default loop value
+			}
+		}
 		exec := executor.New(config)
 
 		ctx := context.Background()
@@ -134,5 +145,6 @@ func init() {
 	runCmd.Flags().Lookup("loop").NoOptDefVal = "10"
 	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
 	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run observation analysis")
+	runCmd.Flags().IntVar(&maxRetries, "max-retries", 0, "Max retry attempts per plan (default: same as --loop value)")
 	rootCmd.AddCommand(runCmd)
 }

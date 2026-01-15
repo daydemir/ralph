@@ -58,6 +58,14 @@ type Config struct {
 	InactivityTimeoutMins  int
 	WorkDir                string
 	PlanningDir            string
+	MaxRetries             int
+}
+
+// PlanRetryState tracks retry state for progressive guidance
+type PlanRetryState struct {
+	Attempts     int
+	LastProgress string
+	LastOutput   string
 }
 
 // DefaultConfig returns default executor configuration
@@ -95,6 +103,7 @@ type RunResult struct {
 	Duration    time.Duration
 	Error       error
 	TasksFailed []string
+	LastOutput  string
 }
 
 // ExecutePlan runs a single plan and returns the result
@@ -251,7 +260,13 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	var lastPhaseNumber int = -1
 	var lastPlanPath string
 	var lastProgressContent string
-	softFailedPlans := make(map[string]bool) // Track plans that soft-failed to skip them
+	planRetries := make(map[string]*PlanRetryState) // Track retry state per plan
+
+	// Determine max retries (default to iteration count)
+	maxRetries := e.config.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = maxIterations
+	}
 
 	for i := 1; i <= maxIterations; i++ {
 		// Reload phases to get current state
@@ -267,25 +282,17 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 			return nil
 		}
 
-		// Skip plans that previously soft-failed (e.g., manual checkpoints)
-		for plan != nil && softFailedPlans[plan.Path] {
-			e.display.Info("Skipping", fmt.Sprintf("%s (soft-failed previously, moving to next)", plan.Name))
-			// Mark as completed temporarily to find next plan
-			plan.IsCompleted = true
-			phase, plan = state.FindNextPlan(phases)
-		}
-		if plan == nil {
-			e.display.AllComplete()
-			return nil
-		}
-
 		// Check for stuck loop - same plan found twice with NO progress made
 		// This allows bailout recovery (same plan, but Progress section updated)
 		if plan.Path == lastPlanPath {
 			currentProgress := extractProgressSection(plan.Path)
 			if currentProgress == lastProgressContent {
-				// Same progress = truly stuck (no work was done)
-				return fmt.Errorf("stuck on plan %s - Progress section unchanged after execution", plan.Name)
+				// Check if we've exceeded retries
+				retryState := planRetries[plan.Path]
+				if retryState != nil && retryState.Attempts >= maxRetries {
+					return fmt.Errorf("exceeded max retries (%d) for plan %s", maxRetries, plan.Name)
+				}
+				// Same progress but still have retries - will be handled below
 			}
 			// Progress section was updated = bailout recovery, allow continuation
 			e.display.Resume(fmt.Sprintf("Resuming %s (Progress updated, continuing)", plan.Name))
@@ -293,30 +300,36 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		lastPlanPath = plan.Path
 		lastProgressContent = extractProgressSection(plan.Path)
 
-		// Check if we're starting a new phase - if so, scan for decision checkpoints
+		// Check if we're starting a new phase - if so, run phase start analysis
 		if phase.Number != lastPhaseNumber {
 			lastPhaseNumber = phase.Number
-			created, err := e.MaybeCreateDecisionsPlan(phase)
+			// Run phase start analysis (bundles decisions AND manual tasks)
+			if err := e.RunPhaseStartAnalysis(phase); err != nil {
+				e.display.Warning(fmt.Sprintf("Phase start analysis failed: %v", err))
+			}
+			// Reload phases after analysis may have created new plans
+			phases, err = state.LoadPhases(e.config.PlanningDir)
 			if err != nil {
-				e.display.Warning(fmt.Sprintf("Failed to create decisions plan: %v", err))
-			} else if created {
-				// Decisions plan was created - reload phases and find next plan again
-				phases, err = state.LoadPhases(e.config.PlanningDir)
-				if err != nil {
-					return fmt.Errorf("cannot reload phases after decisions plan: %w", err)
-				}
-				phase, plan = state.FindNextPlan(phases)
-				if plan == nil {
-					e.display.AllComplete()
-					return nil
-				}
+				return fmt.Errorf("cannot reload phases after phase start analysis: %w", err)
+			}
+			phase, plan = state.FindNextPlan(phases)
+			if plan == nil {
+				e.display.AllComplete()
+				return nil
 			}
 		}
 
 		total, completed := state.CountPlans(phases)
+
+		// Check if this is a retry and add retry info to display
+		retryState := planRetries[plan.Path]
+		if retryState != nil && retryState.Attempts > 0 {
+			e.display.Info("Retry", fmt.Sprintf("Attempt %d/%d for %s", retryState.Attempts+1, maxRetries, plan.Name))
+		}
+
 		e.display.Iteration(i, maxIterations, plan.Name, completed, total)
 
-		// Execute the plan
+		// Execute the plan (with retry guidance if this is a retry)
 		result := e.ExecutePlan(ctx, phase, plan)
 
 		// Run post-analysis ALWAYS - even on hard failures - to diagnose issues and update plans
@@ -333,18 +346,39 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				e.display.LoopFailed(plan.Name, result.Error, completed)
 				return result.Error
 			}
-			// Soft failure - track it so we skip on next iteration
-			softFailedPlans[plan.Path] = true
-			e.display.Warning(fmt.Sprintf("%s (soft failure, will skip on next iteration)", plan.Name))
-			if result.Error != nil {
-				fmt.Printf("   Warning: %v\n", result.Error)
+
+			// Soft failure - run soft failure analysis to decide what to do
+			if retryState == nil {
+				retryState = &PlanRetryState{}
+				planRetries[plan.Path] = retryState
 			}
-			fmt.Println()
+
+			if retryState.Attempts < maxRetries {
+				// Run soft failure analysis
+				sfResult := e.runSoftFailureAnalysis(ctx, phase, plan, result)
+
+				switch sfResult.Decision {
+				case RetryWithGuidance:
+					retryState.Attempts++
+					retryState.LastProgress = extractProgressSection(plan.Path)
+					retryState.LastOutput = result.LastOutput
+					e.display.Info("Analysis", fmt.Sprintf("Will retry: %s", sfResult.Reason))
+					// Don't increment completed - this plan will be found again on next iteration
+					continue
+				case MarkComplete:
+					// Analysis says work is done despite missing signal
+					e.display.Success(fmt.Sprintf("Analysis determined complete: %s", sfResult.Reason))
+				case EscalateToHuman:
+					return fmt.Errorf("human intervention required: %s", sfResult.Reason)
+				}
+			} else {
+				return fmt.Errorf("exceeded max retries (%d) for plan %s", maxRetries, plan.Name)
+			}
 		} else {
 			// Only print checkmark on actual success
 			e.display.Success(fmt.Sprintf("Complete (%s)", result.Duration.Round(time.Second)))
-			fmt.Println()
 		}
+		fmt.Println()
 	}
 
 	e.display.MaxIterations(maxIterations)
@@ -544,6 +578,36 @@ BEFORE signaling ###PLAN_COMPLETE###, you MUST verify all background tasks have 
    d. Only then signal ###PLAN_COMPLETE###
 
 Ralph will verify SUMMARY.md exists before accepting the completion signal.
+
+### Manual Task Handling (AUTONOMOUS MODE - CRITICAL)
+
+When encountering a task with type="manual" or type="checkpoint:human-action":
+
+**DO NOT wait for user input.** You are running in autonomous mode without interactive input.
+
+1. **Record the task as an observation:**
+` + "```" + `xml
+<observation type="manual-checkpoint-deferred" severity="info">
+  <title>Manual task deferred: [task name]</title>
+  <detail>Task requires human action. Bundled to phase-end manual plan.</detail>
+  <file>[relevant file if any]</file>
+  <action>none</action>
+</observation>
+` + "```" + `
+
+2. **Skip the task and continue to next task**
+
+3. **At plan end:** Note deferred manual tasks in SUMMARY.md
+
+**Why:** Manual tasks are bundled into a separate XX-99-manual-PLAN.md that runs at phase end.
+This keeps automation flowing while collecting human work.
+
+**Example handling:**
+- See task: ` + "`<task type=\"manual\">Add file to Xcode...</task>`" + `
+- Record observation with type="manual-checkpoint-deferred"
+- Skip the task
+- Continue with next auto task
+- In SUMMARY.md: "Deferred 1 manual task to phase-end plan"
 
 ### Ralph Signals
 
@@ -800,6 +864,108 @@ func extractProgressSection(planPath string) string {
 	return matches[1]
 }
 
+// SoftFailureDecision indicates how to handle a soft failure
+type SoftFailureDecision int
+
+const (
+	RetryWithGuidance SoftFailureDecision = iota
+	MarkComplete
+	EscalateToHuman
+)
+
+// SoftFailureAnalysisResult holds the result of analyzing a soft failure
+type SoftFailureAnalysisResult struct {
+	Decision SoftFailureDecision
+	Reason   string
+	Guidance string
+}
+
+// runSoftFailureAnalysis evaluates what happened during a soft failure and decides how to proceed
+func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, result *RunResult) *SoftFailureAnalysisResult {
+	// Check if SUMMARY.md exists → likely complete
+	summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+	if _, err := os.Stat(summaryPath); err == nil {
+		return &SoftFailureAnalysisResult{
+			Decision: MarkComplete,
+			Reason:   "SUMMARY.md exists, plan appears complete",
+		}
+	}
+
+	// Check Progress section
+	progress := extractProgressSection(plan.Path)
+	if strings.Contains(progress, "[COMPLETE]") && !strings.Contains(progress, "[PENDING]") {
+		// All tasks marked complete but no SUMMARY
+		return &SoftFailureAnalysisResult{
+			Decision: RetryWithGuidance,
+			Reason:   "Tasks complete but SUMMARY.md missing",
+			Guidance: "All tasks appear complete. Create SUMMARY.md and signal ###PLAN_COMPLETE###",
+		}
+	}
+
+	// Check for manual checkpoint in last output
+	if strings.Contains(result.LastOutput, "MANUAL CHECKPOINT") ||
+		strings.Contains(result.LastOutput, "type=\"manual\"") ||
+		strings.Contains(result.LastOutput, "checkpoint:human-action") {
+		return &SoftFailureAnalysisResult{
+			Decision: RetryWithGuidance,
+			Reason:   "Hit manual checkpoint - will skip on retry",
+			Guidance: "Skip manual tasks (they're bundled to phase-end plan). Continue with auto tasks only.",
+		}
+	}
+
+	// Default: retry with general guidance
+	return &SoftFailureAnalysisResult{
+		Decision: RetryWithGuidance,
+		Reason:   "Unexpected exit - retrying with progress logging",
+	}
+}
+
+// RunPhaseStartAnalysis runs phase-start analysis to bundle decisions and manual tasks
+func (e *Executor) RunPhaseStartAnalysis(phase *state.Phase) error {
+	// Create decisions plan (runs FIRST - plan 00)
+	created, err := e.MaybeCreateDecisionsPlan(phase)
+	if err != nil {
+		e.display.Warning(fmt.Sprintf("Failed to create decisions plan: %v", err))
+	} else if created {
+		e.display.Info("Phase Start", "Created decisions plan (runs first)")
+	}
+
+	// Create manual tasks plan (runs LAST - plan 99)
+	created, err = e.MaybeCreateManualTasksPlan(phase)
+	if err != nil {
+		e.display.Warning(fmt.Sprintf("Failed to create manual tasks plan: %v", err))
+	} else if created {
+		e.display.Info("Phase Start", "Created manual tasks plan (runs last)")
+	}
+
+	return nil
+}
+
+// buildRetryGuidance generates progressive guidance for retry attempts
+func buildRetryGuidance(state *PlanRetryState) string {
+	return fmt.Sprintf(`
+### RETRY ATTEMPT %d
+
+This plan has been attempted %d times previously.
+
+**CRITICAL: Log progress BEFORE each action.**
+Before executing any task, update the ## Progress section with:
+- "Task N: [STARTING] - About to [what you're doing]"
+Then execute. Then update to [COMPLETE] or [FAILED].
+
+This ensures we capture state even if execution is interrupted.
+
+**Previous attempt info:**
+Last progress state:
+%s
+
+Last output before exit:
+%s
+
+Analyze what went wrong and proceed carefully.
+`, state.Attempts+1, state.Attempts, state.LastProgress, state.LastOutput)
+}
+
 // CheckGSDInstalled verifies GSD is installed
 func CheckGSDInstalled() error {
 	// Check if GSD commands are available by checking for the skill files
@@ -1000,6 +1166,111 @@ Subsequent plans will read STATE.md to access these decisions.
 - All architectural and approach decisions are finalized
 - STATE.md Decisions table is populated with all choices
 - Team is aligned on the approach before execution begins
+`)
+
+	return os.WriteFile(outPath, []byte(content.String()), 0644)
+}
+
+// ManualTask represents a manual task extracted from a plan
+type ManualTask struct {
+	PlanNumber  string
+	PlanName    string
+	PlanPath    string
+	TaskName    string
+	TaskContent string
+}
+
+// MaybeCreateManualTasksPlan scans a phase for manual and checkpoint:human-action tasks and creates a bundled manual tasks plan
+func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) {
+	// Check if manual tasks plan already exists
+	manualPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99-manual-PLAN.md", phase.Number))
+	if _, err := os.Stat(manualPath); err == nil {
+		// Manual tasks plan already exists
+		return false, nil
+	}
+
+	// Scan all plans in this phase for manual and checkpoint:human-action tasks
+	var manualTasks []ManualTask
+	manualPattern := regexp.MustCompile(`(?s)<task\s+type="(?:manual|checkpoint:human-action)"[^>]*>(.*?)</task>`)
+
+	for _, plan := range phase.Plans {
+		content, err := os.ReadFile(plan.Path)
+		if err != nil {
+			continue
+		}
+
+		matches := manualPattern.FindAllStringSubmatch(string(content), -1)
+		for i, match := range matches {
+			if len(match) > 1 {
+				manualTasks = append(manualTasks, ManualTask{
+					PlanNumber:  plan.Number,
+					PlanName:    plan.Name,
+					PlanPath:    plan.Path,
+					TaskName:    fmt.Sprintf("Manual Task %d", i+1),
+					TaskContent: strings.TrimSpace(match[1]),
+				})
+			}
+		}
+	}
+
+	if len(manualTasks) == 0 {
+		// No manual tasks found in this phase
+		return false, nil
+	}
+
+	e.display.Info("Manual Tasks", fmt.Sprintf("Found %d manual tasks, creating plan...", len(manualTasks)))
+
+	// Create the manual tasks plan
+	err := e.createManualTasksPlan(phase, manualTasks, manualPath)
+	if err != nil {
+		return false, err
+	}
+
+	e.display.Info("Manual Tasks", fmt.Sprintf("Created %s", filepath.Base(manualPath)))
+
+	return true, nil
+}
+
+// createManualTasksPlan generates the bundled manual tasks plan file
+func (e *Executor) createManualTasksPlan(phase *state.Phase, tasks []ManualTask, outPath string) error {
+	var content strings.Builder
+
+	// Write frontmatter
+	content.WriteString(fmt.Sprintf(`---
+phase: %d
+plan: 99
+type: manual
+status: pending
+---
+
+# Phase %d Manual Tasks: Human Verification
+
+## Objective
+
+Complete all manual tasks that couldn't be automated during phase execution.
+
+## Manual Tasks
+
+`, phase.Number, phase.Number))
+
+	// Write each manual task
+	for i, task := range tasks {
+		content.WriteString(fmt.Sprintf(`### Task %d: %s (from Plan %s)
+
+**Original plan:** %s
+
+<task type="manual">
+%s
+</task>
+
+`, i+1, task.TaskName, task.PlanName, task.PlanPath, task.TaskContent))
+	}
+
+	// Write verification section
+	content.WriteString(`## Verification
+
+- [ ] All manual tasks completed
+- [ ] Verified each task's done criteria
 `)
 
 	return os.WriteFile(outPath, []byte(content.String()), 0644)
