@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/executor"
@@ -14,7 +13,7 @@ import (
 )
 
 var (
-	runLoopStr      string
+	runLoop         int
 	runModel        string
 	runSkipAnalysis bool
 	maxRetries      int
@@ -31,8 +30,8 @@ Single execution (default):
   Executes the next incomplete plan and stops.
 
 Autonomous loop:
-  ralph run --loop        (default: 10 iterations)
-  ralph run --loop 15     (15 iterations)
+  ralph run --loop 10     (10 iterations)
+  ralph run -l 20         (20 iterations)
 
   Runs multiple plans automatically until:
   - All plans complete
@@ -89,25 +88,17 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 		}
 		if maxRetries > 0 {
 			config.MaxRetries = maxRetries
-		} else if runLoopStr != "" {
+		} else if runLoop > 0 {
 			// Default max-retries to same as loop value if not specified
-			if n, err := strconv.Atoi(runLoopStr); err == nil && n > 0 {
-				config.MaxRetries = n
-			} else {
-				config.MaxRetries = 10 // Default loop value
-			}
+			config.MaxRetries = runLoop
 		}
 		exec := executor.New(config)
 
 		ctx := context.Background()
 
-		if runLoopStr != "" {
+		if runLoop > 0 {
 			// Autonomous loop mode
-			maxIterations := 10
-			if n, err := strconv.Atoi(runLoopStr); err == nil && n > 0 {
-				maxIterations = n
-			}
-			return exec.LoopWithAnalysis(ctx, maxIterations, runSkipAnalysis)
+			return exec.LoopWithAnalysis(ctx, runLoop, runSkipAnalysis)
 		}
 
 		// Single plan execution
@@ -141,8 +132,7 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runLoopStr, "loop", "", "run autonomous loop (optional: max iterations, default 10)")
-	runCmd.Flags().Lookup("loop").NoOptDefVal = "10"
+	runCmd.Flags().IntVarP(&runLoop, "loop", "l", 0, "run autonomous loop for N iterations (e.g., --loop 10)")
 	runCmd.Flags().StringVar(&runModel, "model", "", "model to use (sonnet, opus, haiku)")
 	runCmd.Flags().BoolVar(&runSkipAnalysis, "skip-analysis", false, "skip post-run observation analysis")
 	runCmd.Flags().IntVar(&maxRetries, "max-retries", 0, "Max retry attempts per plan (default: same as --loop value)")
