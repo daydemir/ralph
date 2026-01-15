@@ -226,6 +226,15 @@ func printSuggestedActions(phases []state.Phase, nextPlan *state.Plan, total, co
 	fmt.Println()
 
 	if nextPlan != nil {
+		// Check if there's a phase ready for review (has plans but none executed)
+		phaseReadyForReview := findPhaseReadyForReview(phases)
+		if phaseReadyForReview != nil {
+			fmt.Println("  Review before running:")
+			reviewCmd := fmt.Sprintf("ralph review %d", phaseReadyForReview.Number)
+			fmt.Printf("    %-30s %s\n", cyan(reviewCmd), dim("Walk through plans before first execution"))
+			fmt.Println()
+		}
+
 		// Has incomplete plans - suggest execution
 		fmt.Println("  Continue execution:")
 		fmt.Printf("    %-30s %s\n", cyan("ralph run"), dim("Execute next incomplete plan"))
@@ -303,6 +312,7 @@ func printAvailableCommands(cyan, dim, bold func(a ...interface{}) string) {
 	fmt.Printf("  %-32s %s\n", cyan("ralph discover N"), "Research Phase N before planning")
 	fmt.Printf("  %-32s %s\n", cyan("ralph discuss N"), "Gather context for Phase N interactively")
 	fmt.Printf("  %-32s %s\n", cyan("ralph plan N"), "Create executable plans for Phase N")
+	fmt.Printf("  %-32s %s\n", cyan("ralph review N"), "Review plans before execution")
 	fmt.Println()
 
 	fmt.Println(dim("Execution:"))
@@ -313,6 +323,7 @@ func printAvailableCommands(cyan, dim, bold func(a ...interface{}) string) {
 	fmt.Println()
 
 	fmt.Println(dim("Roadmap Management:"))
+	fmt.Printf("  %-32s %s\n", cyan("ralph update"), "Conversational roadmap updates")
 	fmt.Printf("  %-32s %s\n", cyan("ralph add-phase \"desc\""), "Add new phase to end of roadmap")
 	fmt.Printf("  %-32s %s\n", cyan("ralph insert-phase N \"desc\""), "Insert urgent work as Phase N.1")
 	fmt.Printf("  %-32s %s\n", cyan("ralph remove-phase N"), "Remove phase and renumber")
@@ -387,3 +398,23 @@ func findNextPhaseWithoutPlans(phases []state.Phase) *state.Phase {
 	return nil
 }
 
+// findPhaseReadyForReview finds a phase that has plans but none completed (fresh, ready for review)
+func findPhaseReadyForReview(phases []state.Phase) *state.Phase {
+	for i := range phases {
+		if len(phases[i].Plans) > 0 {
+			// Check if any plans are completed
+			hasCompleted := false
+			for _, p := range phases[i].Plans {
+				if p.IsCompleted {
+					hasCompleted = true
+					break
+				}
+			}
+			// Phase has plans but none completed - ready for review
+			if !hasCompleted {
+				return &phases[i]
+			}
+		}
+	}
+	return nil
+}

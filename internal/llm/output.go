@@ -95,10 +95,10 @@ type ContentBlock struct {
 
 // UsageBlock represents token usage data from Claude's output
 type UsageBlock struct {
-	InputTokens            int `json:"input_tokens"`
-	OutputTokens           int `json:"output_tokens"`
-	CacheCreationTokens    int `json:"cache_creation_input_tokens"`
-	CacheReadTokens        int `json:"cache_read_input_tokens"`
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens"`
+	CacheReadTokens     int `json:"cache_read_input_tokens"`
 }
 
 // ConsoleHandler implements OutputHandler for terminal output

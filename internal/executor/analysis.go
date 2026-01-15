@@ -340,7 +340,7 @@ If observations reveal work not covered by any existing plan:
 - Set status to PENDING
 
 New plan template structure:
-` + "```" + `markdown
+`+"```"+`markdown
 ---
 phase: [phase-number]
 plan: [plan-number]
@@ -369,7 +369,7 @@ Created by analysis agent based on observation:
 
 ## Success Criteria
 - [Criteria]
-` + "```" + `
+`+"```"+`
 
 #### 3. SKIP/REMOVE PLANS
 If observations show planned work is already complete:
@@ -503,7 +503,7 @@ func FilterBySeverity(observations []Observation, minSeverity string) []Observat
 
 // CheckpointVerification represents a checkpoint that needs human verification
 type CheckpointVerification struct {
-	PlanNumber     string   // String to support decimal plan numbers like "5.1"
+	PlanNumber     string // String to support decimal plan numbers like "5.1"
 	PlanName       string
 	PlanPath       string
 	CheckpointName string

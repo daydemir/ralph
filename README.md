@@ -37,17 +37,19 @@ Ralph uses a **phase-by-phase workflow**. You don't plan everything upfront - yo
 └───────────────────────────────────────────────────────────┘
                           │
                           ▼
-┌───────────────────────────────────────────────────────────┐
-│  PER-PHASE LOOP (repeat for each phase)                   │
-│                                                           │
-│  ┌──────────┐     ┌──────────┐    ┌─────────┐    ┌─────┐  │
-│  │ discover │  →  │ discuss  │ →  │  plan   │ →  │ run │  │
-│  │(optional)│     │(optional)│    │         │    │     │  │
-│  └──────────┘     └──────────┘    └─────────┘    └─────┘  │
-│                                                           │
-│  Phase 1 → Phase 2 → Phase 3 → ... → Done                 │
-│                                                           │
-└───────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  PER-PHASE LOOP (repeat for each phase)                             │
+│                                                                     │
+│  ┌──────────┐   ┌──────────┐   ┌────────┐   ┌────────┐   ┌───────┐  │
+│  │ discover │ → │ discuss  │ → │  plan  │ → │ review │ → │  run  │  │
+│  │(optional)│   │(optional)│   │        │   │(recomm)│   │       │  │
+│  └──────────┘   └──────────┘   └────────┘   └────────┘   └───────┘  │
+│                                                                     │
+│  Phase 1 → Phase 2 → Phase 3 → ... → Done                           │
+│                                                                     │
+│            ralph update ← (anytime you have new findings)           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 
          At any time: ralph status (see where you are)
 ```
@@ -245,6 +247,7 @@ Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive 
 | Command | Description |
 |---------|-------------|
 | `ralph plan [N]` | Create executable PLAN.md files for phase N |
+| `ralph review [N]` | Review plans before execution - walk through tasks and verifications |
 
 ### Execution Commands
 
@@ -266,9 +269,12 @@ Model options:
 
 | Command | Description |
 |---------|-------------|
+| `ralph update` | Conversational roadmap updates - Claude decides how to incorporate your findings |
 | `ralph add-phase "desc"` | Add phase to end of roadmap |
 | `ralph insert-phase N "desc"` | Insert urgent work as phase N.1 |
 | `ralph remove-phase N` | Remove phase N and renumber |
+
+> **Tip:** Use `ralph update` when you're not sure how to modify the roadmap. Tell Claude about your findings and it will decide whether to add to existing phases, create new phases, or insert urgent work.
 
 **Planning is mandatory** - Ralph enforces that you properly understand and plan work before executing.
 

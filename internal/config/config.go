@@ -10,10 +10,10 @@ import (
 
 // Config represents the ralph configuration
 type Config struct {
-	LLM     LLMConfig      `mapstructure:"llm"`
-	Claude  ClaudeConfig   `mapstructure:"claude"`
-	Mistral MistralConfig  `mapstructure:"mistral"`
-	Build   BuildConfig    `mapstructure:"build"`
+	LLM     LLMConfig     `mapstructure:"llm"`
+	Claude  ClaudeConfig  `mapstructure:"claude"`
+	Mistral MistralConfig `mapstructure:"mistral"`
+	Build   BuildConfig   `mapstructure:"build"`
 }
 
 // LLMConfig contains LLM backend settings

@@ -8,7 +8,7 @@ import (
 func TestSignalDetection(t *testing.T) {
 	testCases := []struct {
 		name           string
-		eventType      string     // "assistant" or "result"
+		eventType      string // "assistant" or "result"
 		content        string
 		wantSignal     SignalType // empty string for plan_complete, SignalBailout for bailout, others for failure
 		isPlanComplete bool       // true if wantSignal is plan_complete

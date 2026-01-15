@@ -36,9 +36,9 @@ const (
 // Theme holds all color functions for consistent styling
 type Theme struct {
 	// Ralph orchestration (prominent)
-	RalphBorder  func(a ...interface{}) string
-	RalphLabel   func(a ...interface{}) string
-	RalphText    func(a ...interface{}) string
+	RalphBorder func(a ...interface{}) string
+	RalphLabel  func(a ...interface{}) string
+	RalphText   func(a ...interface{}) string
 
 	// Claude output (subdued)
 	ClaudeTimestamp func(a ...interface{}) string
@@ -65,9 +65,9 @@ type Theme struct {
 func DefaultTheme() *Theme {
 	return &Theme{
 		// Ralph orchestration - bright cyan for visibility
-		RalphBorder:  color.New(color.FgCyan).SprintFunc(),
-		RalphLabel:   color.New(color.FgCyan, color.Bold).SprintFunc(),
-		RalphText:    color.New(color.FgWhite).SprintFunc(),
+		RalphBorder: color.New(color.FgCyan).SprintFunc(),
+		RalphLabel:  color.New(color.FgCyan, color.Bold).SprintFunc(),
+		RalphText:   color.New(color.FgWhite).SprintFunc(),
 
 		// Claude output - dimmer/gray to distinguish from Ralph
 		ClaudeTimestamp: color.New(color.FgHiBlack).SprintFunc(),

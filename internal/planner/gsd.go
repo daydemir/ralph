@@ -217,6 +217,22 @@ func (g *GSD) Progress(ctx context.Context) error {
 	return g.RunCommand(ctx, "/gsd:progress")
 }
 
+// ReviewPlans runs /gsd:review-plans N (requires plans to exist)
+func (g *GSD) ReviewPlans(ctx context.Context, phase int) error {
+	if err := g.RequireRoadmap(); err != nil {
+		return err
+	}
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:review-plans %d", phase))
+}
+
+// UpdateRoadmap runs /gsd:update-roadmap (requires ROADMAP.md)
+func (g *GSD) UpdateRoadmap(ctx context.Context) error {
+	if err := g.RequireRoadmap(); err != nil {
+		return err
+	}
+	return g.RunCommand(ctx, "/gsd:update-roadmap")
+}
+
 func claudeNotFoundError() error {
 	return fmt.Errorf(`claude not found in PATH
 

@@ -47,18 +47,18 @@ type FailureType int
 
 const (
 	FailureNone FailureType = iota // No failure
-	FailureHard                     // Task/verification failed - stop loop
-	FailureSoft                     // Signal missing or bailout - continue loop
+	FailureHard                    // Task/verification failed - stop loop
+	FailureSoft                    // Signal missing or bailout - continue loop
 )
 
 // Config holds executor configuration
 type Config struct {
-	ClaudeBinary           string
-	Model                  string
-	InactivityTimeoutMins  int
-	WorkDir                string
-	PlanningDir            string
-	MaxRetries             int
+	ClaudeBinary          string
+	Model                 string
+	InactivityTimeoutMins int
+	WorkDir               string
+	PlanningDir           string
+	MaxRetries            int
 }
 
 // PlanRetryState tracks retry state for progressive guidance
@@ -542,14 +542,14 @@ Ralph's analysis agent parses observations to improve subsequent plans. Types:
 **IMPORTANT**: Prose observations like "## Discovery: ..." or "**Finding:** ..." CANNOT be parsed.
 You MUST use this exact XML format:
 
-` + "```" + `xml
+`+"```"+`xml
 <observation type="TYPE" severity="SEVERITY">
   <title>Short descriptive title</title>
   <detail>What you found and why it matters</detail>
   <file>path/to/relevant/file</file>
   <action>ACTION</action>
 </observation>
-` + "```" + `
+`+"```"+`
 
 **Severities**: critical, high, medium, low, info
 **Actions**: needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
@@ -581,7 +581,7 @@ Test failures require STRUCTURED observations, not prose notes. The analysis age
 4. For tooling issues (xcodebuild syntax), use type="test-infrastructure"
 
 **Example - Test Failures:**
-` + "```" + `xml
+`+"```"+`xml
 <observation type="test-failed" severity="high">
   <title>3 SpatialAudioService tests failing</title>
   <detail>
@@ -594,10 +594,10 @@ Test failures require STRUCTURED observations, not prose notes. The analysis age
   <file>ar/AR/Unit Tests iOS/AudioSpatialTests.swift</file>
   <action>needs-fix</action>
 </observation>
-` + "```" + `
+`+"```"+`
 
 **Example - Test Infrastructure:**
-` + "```" + `xml
+`+"```"+`xml
 <observation type="test-infrastructure" severity="medium">
   <title>xcodebuild -only-testing syntax unclear</title>
   <detail>
@@ -609,13 +609,13 @@ Test failures require STRUCTURED observations, not prose notes. The analysis age
   <file>ar/AR/AR.xcodeproj</file>
   <action>needs-documentation</action>
 </observation>
-` + "```" + `
+`+"```"+`
 
 ### Recording Observations (Use Subagents to Save Context)
 
 Recording observations inline burns your main context. Use Task tool to delegate:
 
-` + "```" + `
+`+"```"+`
 Task(subagent_type="general-purpose", prompt="
   Add this observation to PLAN.md in the Observations section:
   <observation type=\"stub\" severity=\"medium\">
@@ -625,7 +625,7 @@ Task(subagent_type="general-purpose", prompt="
     <action>needs-implementation</action>
   </observation>
 ")
-` + "```" + `
+`+"```"+`
 
 Record observations AS YOU GO - don't batch them at the end.
 
@@ -646,16 +646,16 @@ To maximize effectiveness:
 When you find that work in a task is ALREADY COMPLETE (files exist, code already implemented):
 
 1. **Record an observation:**
-   ` + "```" + `xml
+   `+"```"+`xml
    <observation type="already-complete" severity="info">
      <title>Task N already implemented</title>
      <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
      <file>path/to/existing/file</file>
      <action>none</action>
    </observation>
-   ` + "```" + `
+   `+"```"+`
 
-2. **Update Progress section:** Mark task as ` + "`[ALREADY_COMPLETE]`" + `
+2. **Update Progress section:** Mark task as `+"`[ALREADY_COMPLETE]`"+`
 
 3. **Verify existing work meets requirements** - if partial, complete it
 
@@ -668,9 +668,9 @@ When you find that work in a task is ALREADY COMPLETE (files exist, code already
 BEFORE signaling ###PLAN_COMPLETE###, you MUST verify all background tasks have finished:
 
 1. **Check for running background tasks:**
-   - If you started tests/builds with ` + "`run_in_background: true`" + `, you MUST wait for completion
+   - If you started tests/builds with `+"`run_in_background: true`"+`, you MUST wait for completion
    - Read the output file (from TaskOutput) to verify tests completed AND passed
-   - Use Bash: ` + "`ps aux | grep -E \"(xcodebuild|npm test|pytest|go test)\" | grep -v grep`" + ` to check for running processes
+   - Use Bash: `+"`ps aux | grep -E \"(xcodebuild|npm test|pytest|go test)\" | grep -v grep`"+` to check for running processes
 
 2. **You CANNOT signal ###PLAN_COMPLETE### if:**
    - Background tests are still running (check process list)
@@ -693,14 +693,14 @@ When encountering a task with type="manual" or type="checkpoint:human-action":
 **DO NOT wait for user input.** You are running in autonomous mode without interactive input.
 
 1. **Record the task as an observation:**
-` + "```" + `xml
+`+"```"+`xml
 <observation type="manual-checkpoint-deferred" severity="info">
   <title>Manual task deferred: [task name]</title>
   <detail>Task requires human action. Bundled to phase-end manual plan.</detail>
   <file>[relevant file if any]</file>
   <action>none</action>
 </observation>
-` + "```" + `
+`+"```"+`
 
 2. **Skip the task and continue to next task**
 
@@ -710,7 +710,7 @@ When encountering a task with type="manual" or type="checkpoint:human-action":
 This keeps automation flowing while collecting human work.
 
 **Example handling:**
-- See task: ` + "`<task type=\"manual\">Add file to Xcode...</task>`" + `
+- See task: `+"`<task type=\"manual\">Add file to Xcode...</task>`"+`
 - Record observation with type="manual-checkpoint-deferred"
 - Skip the task
 - Continue with next auto task
@@ -834,16 +834,16 @@ Record observations AS YOU GO - don't batch at end. Under-reporting = no analysi
 When you find work is ALREADY COMPLETE:
 
 1. **Record an observation:**
-   ` + "```" + `xml
+   `+"```"+`xml
    <observation type="already-complete" severity="info">
      <title>Task N already implemented</title>
      <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
      <file>path/to/existing/file</file>
      <action>none</action>
    </observation>
-   ` + "```" + `
+   `+"```"+`
 
-2. **Update Progress section:** Mark task as ` + "`[ALREADY_COMPLETE]`" + `
+2. **Update Progress section:** Mark task as `+"`[ALREADY_COMPLETE]`"+`
 
 3. **Verify existing work meets requirements** - if partial, complete it
 
@@ -876,14 +876,14 @@ If builds/tests fail and you cannot fix them, signal ###BUILD_FAILED:{project}##
 
 ## Background Task Verification (MANDATORY)
 
-If you started ANY tasks with ` + "`" + `run_in_background: true` + "`" + `, you MUST verify completion:
+If you started ANY tasks with `+"`"+`run_in_background: true`+"`"+`, you MUST verify completion:
 
 1. **Wait for background tasks to finish:**
    - Use TaskOutput tool with block=true to wait for completion
    - Read the output file to verify results
 
 2. **Check no processes are still running:**
-   - Use Bash: ` + "`" + `ps aux | grep -E "(xcodebuild|npm test|pytest|go test)" | grep -v grep` + "`" + `
+   - Use Bash: `+"`"+`ps aux | grep -E "(xcodebuild|npm test|pytest|go test)" | grep -v grep`+"`"+`
    - Empty output = no running processes
 
 3. **Verify test results show PASS:**
@@ -1309,8 +1309,8 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 		matches := taskWithTypePattern.FindAllStringSubmatch(string(content), -1)
 		for i, match := range matches {
 			if len(match) > 3 {
-				taskOpenTag := match[1]  // <task type="...">
-				taskContent := match[2]  // task content
+				taskOpenTag := match[1] // <task type="...">
+				taskContent := match[2] // task content
 
 				// Extract and validate task type
 				taskType, err := ExtractTaskType(taskOpenTag)
