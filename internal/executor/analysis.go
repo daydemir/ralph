@@ -418,6 +418,27 @@ When reviewing test-related observations (test-failed, test-infrastructure, tool
 
 3. **Recommend infrastructure plans** when test tooling wastes >60 minutes total across plans
 
+### Blocker Observation Verification
+
+When reviewing observations with type="blocker":
+
+1. **Challenge the blocker claim**: Search for evidence that the blocker may not be legitimate:
+   - Search .planning/archive/progress-*.txt for similar issues that were solved
+   - Search the codebase for workarounds or alternative approaches
+   - Check if the blocker is actually a misunderstanding of requirements
+
+2. **If blocker appears invalid**: Add guidance to subsequent plans on how to work around it:
+   - Document the workaround approach in the plan's <context> section
+   - Reference any codebase examples that show the solution pattern
+   - Flag for retry with specific guidance
+
+3. **If blocker is legitimate**: Document why it truly requires human action:
+   - Requires credentials or physical device access
+   - Depends on genuinely unavailable external systems
+   - Requires permissions that cannot be obtained programmatically
+
+4. **Update subsequent plans** that may hit the same blocker with preemptive guidance
+
 For each plan that needs updating:
 1. Add a note in the plan's <context> section referencing the observation
 2. If a task is invalidated, add a note explaining why
@@ -673,4 +694,169 @@ After all checkpoints are reviewed:
 `)
 
 	return os.WriteFile(outPath, []byte(content.String()), 0644)
+}
+
+// BlockerAnalysisResult holds the result of blocker verification
+type BlockerAnalysisResult struct {
+	IsValid  bool   // true if blocker is legitimate, false if it can be worked around
+	Guidance string // guidance for retry if blocker is invalid
+	Error    error
+}
+
+// buildBlockerAnalysisPrompt creates the prompt for verifying a blocker claim
+func buildBlockerAnalysisPrompt(blockerClaim string, planPath string) string {
+	return fmt.Sprintf(`You are a blocker verification agent. An execution agent claimed it was blocked, but we need to verify this claim before accepting it.
+
+## Blocker Claim
+**Reason:** %s
+**Plan:** %s
+
+## Your Task
+
+Verify whether this blocker is legitimate or if it can be worked around.
+
+### Step 1: Search Historical Progress
+
+Search for similar issues that were solved before:
+- Use Glob to find: .planning/archive/progress-*.txt
+- Use Grep to search these files for keywords from the blocker claim
+- Look for patterns like "was blocked by" followed by "solved by" or "worked around"
+
+### Step 2: Search Codebase for Solutions
+
+Search the codebase for existing solutions:
+- Use Grep to search for relevant code patterns, error messages, or workarounds
+- Check CLAUDE.md for documented solutions to common issues
+- Look for TODO comments or documentation about the blocked functionality
+- Search for similar implementations that might provide a pattern to follow
+
+### Step 3: Analyze the Plan
+
+Read the plan file to understand:
+- What task was being attempted
+- What the expected outcome was
+- Whether there are alternative approaches mentioned
+
+### Step 4: Make a Decision
+
+Based on your research, determine if the blocker is:
+
+**VALID** - The blocker is legitimate if:
+- It requires human action (e.g., credentials, physical device, manual approval)
+- It depends on external systems that are genuinely unavailable
+- It requires resources or permissions that cannot be obtained programmatically
+- No historical solutions or workarounds exist for this type of issue
+
+**INVALID** - The blocker can be worked around if:
+- Similar issues were solved in historical progress files
+- The codebase contains patterns or solutions that apply
+- Alternative approaches exist that weren't tried
+- The issue is a misunderstanding of requirements or capabilities
+- Documentation provides guidance that wasn't followed
+
+## Output Format
+
+After your investigation, output EXACTLY ONE of these signals:
+
+If the blocker is legitimate:
+###BLOCKER_VALID:{brief reason why it's truly blocked}###
+
+If the blocker can be worked around:
+###BLOCKER_INVALID:{specific guidance on how to proceed}###
+
+## Rules
+- Be thorough in your search before deciding
+- Look for at least 3 different search patterns before concluding
+- Favor finding workarounds over accepting blockers
+- If uncertain, lean toward INVALID with guidance to try alternative approaches
+- Keep guidance actionable and specific
+
+Begin investigation now.`, blockerClaim, planPath)
+}
+
+// RunBlockerAnalysis verifies whether a blocker claim is legitimate
+func (e *Executor) RunBlockerAnalysis(ctx context.Context, failure *llm.FailureSignal, plan *state.Plan) *BlockerAnalysisResult {
+	result := &BlockerAnalysisResult{}
+
+	e.display.Info("Blocker Analysis", fmt.Sprintf("Verifying blocker claim: %s", failure.Detail))
+
+	// Build the blocker analysis prompt
+	prompt := buildBlockerAnalysisPrompt(failure.Detail, plan.Path)
+
+	// Execute analysis with Claude using Opus for better research capability
+	opts := llm.ExecuteOptions{
+		Prompt: prompt,
+		ContextFiles: []string{
+			plan.Path,
+			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+		},
+		Model: "opus", // Use Opus for better reasoning on blocker verification
+		AllowedTools: []string{
+			"Read", "Glob", "Grep", "Bash",
+		},
+		WorkDir: e.config.WorkDir,
+	}
+
+	reader, err := e.claude.Execute(ctx, opts)
+	if err != nil {
+		result.Error = fmt.Errorf("blocker analysis execution failed: %w", err)
+		result.IsValid = true // Default to valid if analysis fails
+		return result
+	}
+	defer reader.Close()
+
+	// Parse the stream output and capture the decision
+	handler := llm.NewConsoleHandlerWithDisplay(e.display)
+
+	// We need to capture the output to find the BLOCKER_VALID/INVALID signal
+	var outputBuilder strings.Builder
+	customHandler := &blockerAnalysisHandler{
+		ConsoleHandler: handler,
+		outputBuilder:  &outputBuilder,
+	}
+
+	if err := llm.ParseStream(reader, customHandler, nil); err != nil {
+		result.Error = fmt.Errorf("blocker analysis stream parsing failed: %w", err)
+		result.IsValid = true // Default to valid if parsing fails
+		return result
+	}
+
+	// Parse the output for the decision signal
+	output := outputBuilder.String()
+
+	validPattern := regexp.MustCompile(`###BLOCKER_VALID:([^#]+)###`)
+	invalidPattern := regexp.MustCompile(`###BLOCKER_INVALID:([^#]+)###`)
+
+	if match := validPattern.FindStringSubmatch(output); len(match) > 1 {
+		result.IsValid = true
+		result.Guidance = strings.TrimSpace(match[1])
+		e.display.Info("Blocker Analysis", fmt.Sprintf("Blocker confirmed valid: %s", result.Guidance))
+	} else if match := invalidPattern.FindStringSubmatch(output); len(match) > 1 {
+		result.IsValid = false
+		result.Guidance = strings.TrimSpace(match[1])
+		e.display.Info("Blocker Analysis", fmt.Sprintf("Blocker can be worked around: %s", result.Guidance))
+	} else {
+		// No clear signal - default to valid to be safe
+		result.IsValid = true
+		result.Guidance = "No clear determination from analysis"
+		e.display.Warning("Blocker analysis did not produce a clear decision - treating as valid")
+	}
+
+	return result
+}
+
+// blockerAnalysisHandler wraps ConsoleHandler to capture output text
+type blockerAnalysisHandler struct {
+	*llm.ConsoleHandler
+	outputBuilder *strings.Builder
+}
+
+func (h *blockerAnalysisHandler) OnText(text string) {
+	h.outputBuilder.WriteString(text)
+	h.ConsoleHandler.OnText(text)
+}
+
+func (h *blockerAnalysisHandler) OnDone(result string) {
+	h.outputBuilder.WriteString(result)
+	h.ConsoleHandler.OnDone(result)
 }

@@ -175,13 +175,39 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	var statusLines []string
 
 	if handler.HasFailed() {
-		// Hard failure - task/plan/build/test failed
 		failure := handler.GetFailure()
-		result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
-		result.TasksFailed = []string{failure.Detail}
-		result.FailureType = FailureHard
-		statusLines = append(statusLines,
-			fmt.Sprintf("%s %s: %s", e.display.Theme().Error(display.SymbolError), failure.Type, failure.Detail))
+
+		// For blocker failures, verify the claim before accepting it as hard failure
+		if failure.Type == "blocked" {
+			blockerResult := e.RunBlockerAnalysis(ctx, failure, plan)
+			if blockerResult.Error != nil {
+				e.display.Warning(fmt.Sprintf("Blocker analysis failed: %v", blockerResult.Error))
+			}
+
+			if !blockerResult.IsValid {
+				// Blocker is invalid - treat as soft failure with retry guidance
+				result.Error = fmt.Errorf("blocker claim rejected: %s", failure.Detail)
+				result.FailureType = FailureSoft
+				result.LastOutput = blockerResult.Guidance // Pass guidance to retry logic
+				statusLines = append(statusLines,
+					fmt.Sprintf("%s Blocker claim rejected - will retry with guidance", e.display.Theme().Warning(display.SymbolWarning)),
+					fmt.Sprintf("   Guidance: %s", blockerResult.Guidance))
+			} else {
+				// Blocker is valid - hard failure
+				result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
+				result.TasksFailed = []string{failure.Detail}
+				result.FailureType = FailureHard
+				statusLines = append(statusLines,
+					fmt.Sprintf("%s %s: %s (verified)", e.display.Theme().Error(display.SymbolError), failure.Type, failure.Detail))
+			}
+		} else {
+			// Non-blocker hard failure - task/plan/build/test failed
+			result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
+			result.TasksFailed = []string{failure.Detail}
+			result.FailureType = FailureHard
+			statusLines = append(statusLines,
+				fmt.Sprintf("%s %s: %s", e.display.Theme().Error(display.SymbolError), failure.Type, failure.Detail))
+		}
 	} else if handler.IsPlanComplete() {
 		// Verify SUMMARY.md was created before marking success
 		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
