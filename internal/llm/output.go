@@ -81,6 +81,7 @@ type ConsoleHandler struct {
 	planComplete      bool
 	bailoutSignal     *FailureSignal // Separate tracking for BAILOUT (soft failure)
 	lastDoneText      string         // Track last done message to prevent duplicates
+	onTerminate       func()         // Callback to kill Claude process when token limit exceeded
 }
 
 func NewConsoleHandler() *ConsoleHandler {
@@ -106,13 +107,25 @@ func NewConsoleHandlerWithDisplay(d *display.Display) *ConsoleHandler {
 	}
 }
 
+// NewConsoleHandlerWithTerminate creates a handler with token limit termination support
+func NewConsoleHandlerWithTerminate(d *display.Display, onTerminate func()) *ConsoleHandler {
+	return &ConsoleHandler{
+		display:        d,
+		tokenThreshold: 120000,
+		onTerminate:    onTerminate,
+	}
+}
+
 func (h *ConsoleHandler) OnToolUse(name string) {
 	h.toolCount++
 }
 
 func (h *ConsoleHandler) OnText(text string) {
 	truncated := display.Truncate(text, 400)
-	h.display.Claude(truncated, h.toolCount)
+	h.display.ClaudeWithTokens(truncated, h.toolCount, display.TokenStats{
+		TotalTokens: h.tokenStats.TotalTokens,
+		Threshold:   h.tokenThreshold,
+	})
 	h.toolCount = 0
 }
 
@@ -162,6 +175,11 @@ func (h *ConsoleHandler) OnTokenUsage(usage TokenStats) {
 	h.tokenStats.OutputTokens += usage.OutputTokens
 	h.tokenStats.CacheReadTokens += usage.CacheReadTokens
 	h.tokenStats.TotalTokens = h.tokenStats.InputTokens + h.tokenStats.OutputTokens
+
+	// Check threshold and trigger termination if exceeded
+	if h.tokenStats.TotalTokens >= h.tokenThreshold && h.onTerminate != nil {
+		h.onTerminate()
+	}
 }
 
 func (h *ConsoleHandler) HasFailed() bool {

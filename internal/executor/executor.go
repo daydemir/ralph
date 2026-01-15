@@ -160,7 +160,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	defer reader.Close()
 
 	// Parse the stream output, with termination callback for failure/bailout signals
-	handler := llm.NewConsoleHandlerWithDisplay(e.display)
+	handler := llm.NewConsoleHandlerWithTerminate(e.display, cancelExec)
 	if err := llm.ParseStream(reader, handler, cancelExec); err != nil {
 		result.Error = fmt.Errorf("stream parsing failed: %w", err)
 		e.display.Error(fmt.Sprintf("Stream parsing failed: %v", err))

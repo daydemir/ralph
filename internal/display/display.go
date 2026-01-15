@@ -18,6 +18,12 @@ type Display struct {
 	noColor   bool
 }
 
+// TokenStats holds token usage info for display
+type TokenStats struct {
+	TotalTokens int
+	Threshold   int
+}
+
 // New creates a new Display instance
 func New() *Display {
 	return NewWithOptions(false)
@@ -181,6 +187,30 @@ func (d *Display) Claude(text string, toolCount int) {
 			fmt.Printf("  %s %s%s %s\n", gutter, d.theme.Dim(timestamp), toolStr, d.theme.ClaudeText(line))
 		} else {
 			fmt.Printf("  %s %s%s\n", d.theme.ClaudeTimestamp(GutterDot), strings.Repeat(" ", 10), d.theme.ClaudeText(line))
+		}
+	}
+}
+
+// ClaudeWithTokens prints Claude Code output with token stats
+func (d *Display) ClaudeWithTokens(text string, toolCount int, tokens TokenStats) {
+	timestamp := time.Now().Format("[15:04:05]")
+	gutter := d.theme.ClaudeTimestamp(GutterClaude)
+
+	toolStr := ""
+	if toolCount > 0 {
+		toolStr = fmt.Sprintf(" %s", d.theme.ClaudeToolCount(fmt.Sprintf("[%d]", toolCount)))
+	}
+
+	// Add token display: [42K/120K]
+	tokenStr := fmt.Sprintf(" %s", d.theme.Dim(fmt.Sprintf("[%dK/%dK]", tokens.TotalTokens/1000, tokens.Threshold/1000)))
+
+	lines := d.wrapText(text, d.termWidth-30)
+
+	for i, line := range lines {
+		if i == 0 {
+			fmt.Printf("  %s %s%s%s %s\n", gutter, d.theme.Dim(timestamp), toolStr, tokenStr, d.theme.ClaudeText(line))
+		} else {
+			fmt.Printf("  %s %s%s\n", d.theme.ClaudeTimestamp(GutterDot), strings.Repeat(" ", 20), d.theme.ClaudeText(line))
 		}
 	}
 }
