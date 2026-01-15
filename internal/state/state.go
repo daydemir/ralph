@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // State represents the current project state parsed from STATE.md
@@ -38,7 +40,41 @@ type Plan struct {
 	Number      string // String to support decimal plan numbers like "5.1"
 	Name        string
 	Path        string
+	Type        PlanType
+	Status      string
 	IsCompleted bool // Has corresponding SUMMARY.md
+}
+
+// IsManual returns true if the plan requires manual execution
+func (p *Plan) IsManual() bool {
+	return p.Type == PlanTypeManual
+}
+
+// ParsePlanFrontmatter extracts and validates YAML frontmatter from a plan file
+func ParsePlanFrontmatter(path string) (*PlanFrontmatter, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	text := string(content)
+	if !strings.HasPrefix(text, "---") {
+		return nil, nil // No frontmatter
+	}
+	end := strings.Index(text[3:], "---")
+	if end == -1 {
+		return nil, nil
+	}
+	yamlContent := text[3 : 3+end]
+
+	var fm PlanFrontmatter
+	if err := yaml.Unmarshal([]byte(yamlContent), &fm); err != nil {
+		return nil, fmt.Errorf("invalid frontmatter YAML: %w", err)
+	}
+	if err := fm.Validate(); err != nil {
+		return nil, err
+	}
+	return &fm, nil
 }
 
 // LoadState reads STATE.md and parses project state
@@ -166,11 +202,17 @@ func loadPlans(phaseDir string) ([]Plan, error) {
 			Path: filepath.Join(phaseDir, name),
 		}
 
-		// Extract plan number (e.g., "01-02-PLAN.md" -> "2", "01-05.1-PLAN.md" -> "5.1")
-		re := regexp.MustCompile(`-(\d+(?:\.\d+)?)-PLAN\.md$`)
-		if matches := re.FindStringSubmatch(name); len(matches) >= 2 {
-			plan.Number = matches[1]
+		// Parse frontmatter (REQUIRED)
+		fm, err := ParsePlanFrontmatter(plan.Path)
+		if err != nil {
+			return nil, fmt.Errorf("plan %s: %w", plan.Name, err)
 		}
+		if fm == nil {
+			return nil, fmt.Errorf("plan %s: missing frontmatter", plan.Name)
+		}
+		plan.Type = fm.Type
+		plan.Status = fm.Status
+		plan.Number = fm.Plan
 
 		// Check if SUMMARY.md exists (plan completed)
 		summaryName := strings.Replace(name, "-PLAN.md", "-SUMMARY.md", 1)
@@ -182,8 +224,11 @@ func loadPlans(phaseDir string) ([]Plan, error) {
 		plans = append(plans, plan)
 	}
 
-	// Sort by plan number (handles decimals like "5.1")
+	// Sort by plan number (handles decimals like "5.1"), with manual plans last
 	sort.Slice(plans, func(i, j int) bool {
+		if plans[i].IsManual() != plans[j].IsManual() {
+			return !plans[i].IsManual()
+		}
 		ni, _ := strconv.ParseFloat(plans[i].Number, 64)
 		nj, _ := strconv.ParseFloat(plans[j].Number, 64)
 		return ni < nj

@@ -113,6 +113,11 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		PlanPath: plan.Path,
 	}
 
+	// Check if this is a manual plan - run interactively with gsd:execute-plan
+	if plan.IsManual() {
+		return e.ExecuteManualPlanInteractive(ctx, phase, plan, start)
+	}
+
 	// Show execution start in a Ralph box
 	e.display.RalphBox("RALPH",
 		fmt.Sprintf("Executing: %s", plan.Name),
@@ -243,6 +248,65 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		fmt.Sprintf("Duration: %s", time.Since(start).Round(time.Second)))
 
 	e.display.RalphBox("RALPH", statusLines...)
+
+	result.Duration = time.Since(start)
+	return result
+}
+
+// ExecuteManualPlanInteractive opens an interactive Claude session for manual tasks
+func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *state.Phase, plan *state.Plan, start time.Time) *RunResult {
+	result := &RunResult{
+		PlanPath: plan.Path,
+	}
+
+	e.display.RalphBox("MANUAL PLAN",
+		fmt.Sprintf("Opening interactive session: %s", plan.Name),
+		"Complete manual tasks, then /exit when done")
+
+	// Build prompt that invokes gsd:execute-plan skill
+	prompt := fmt.Sprintf("/gsd:execute-plan %s", plan.Path)
+
+	opts := llm.ExecuteOptions{
+		Prompt: prompt,
+		ContextFiles: []string{
+			plan.Path,
+			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+		},
+		Model:   e.config.Model,
+		WorkDir: e.config.WorkDir,
+	}
+
+	// Run interactively (uses --dangerously-skip-permissions)
+	err := e.claude.ExecuteInteractive(ctx, opts)
+	if err != nil {
+		result.Error = err
+		result.FailureType = FailureSoft
+		e.display.Error(fmt.Sprintf("Interactive session failed: %v", err))
+	} else {
+		// Check if SUMMARY.md was created
+		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+		if _, err := os.Stat(summaryPath); err == nil {
+			result.Success = true
+			result.FailureType = FailureNone
+			e.display.RalphBox("MANUAL PLAN", "Manual tasks completed successfully")
+
+			// Update STATE.md and ROADMAP.md with new progress
+			phases, _ := state.LoadPhases(e.config.PlanningDir)
+			if err := state.UpdateStateFile(e.config.PlanningDir, phases); err != nil {
+				e.display.Warning(fmt.Sprintf("Failed to update STATE.md: %v", err))
+			}
+			if err := state.UpdateRoadmap(e.config.PlanningDir, phases); err != nil {
+				e.display.Warning(fmt.Sprintf("Failed to update ROADMAP.md: %v", err))
+			}
+
+			// Commit and push all repos
+			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
+			e.CommitAndPushRepos(planId)
+		} else {
+			result.FailureType = FailureSoft
+			e.display.Warning("Session ended but SUMMARY.md not created - manual tasks may be incomplete")
+		}
+	}
 
 	result.Duration = time.Since(start)
 	return result
