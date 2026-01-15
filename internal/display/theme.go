@@ -26,6 +26,13 @@ const (
 // IndentClaude is the indentation for Claude output
 const IndentClaude = "  "
 
+// Gutter indicators
+const (
+	GutterClaude   = "│" // Vertical bar for Claude output
+	GutterAnalysis = "○" // Circle for analysis phase
+	GutterDot      = "·" // Continuation dot
+)
+
 // Theme holds all color functions for consistent styling
 type Theme struct {
 	// Ralph orchestration (prominent)
@@ -37,6 +44,10 @@ type Theme struct {
 	ClaudeTimestamp func(a ...interface{}) string
 	ClaudeText      func(a ...interface{}) string
 	ClaudeToolCount func(a ...interface{}) string
+
+	// Analysis output
+	AnalysisGutter func(a ...interface{}) string
+	AnalysisText   func(a ...interface{}) string
 
 	// Status indicators
 	Success func(a ...interface{}) string
@@ -62,6 +73,10 @@ func DefaultTheme() *Theme {
 		ClaudeTimestamp: color.New(color.FgHiBlack).SprintFunc(),
 		ClaudeText:      color.New(color.FgWhite).SprintFunc(),
 		ClaudeToolCount: color.New(color.FgHiBlack).SprintFunc(),
+
+		// Analysis output
+		AnalysisGutter: color.New(color.FgYellow).SprintFunc(),
+		AnalysisText:   color.New(color.FgWhite).SprintFunc(),
 
 		// Status indicators
 		Success: color.New(color.FgGreen).SprintFunc(),
@@ -91,6 +106,8 @@ func NoColorTheme() *Theme {
 		ClaudeTimestamp: identity,
 		ClaudeText:      identity,
 		ClaudeToolCount: identity,
+		AnalysisGutter:  identity,
+		AnalysisText:    identity,
 		Success:         identity,
 		Error:           identity,
 		Warning:         identity,

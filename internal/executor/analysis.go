@@ -61,16 +61,17 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 	result.ObservationsFound = len(observations)
 
 	if len(observations) == 0 {
-		e.display.Info("Analysis", "No observations to analyze")
+		e.display.Analysis("No observations to analyze")
 		return result
 	}
 
-	e.display.Info("Analysis", fmt.Sprintf("Found %d observations, running analysis...", len(observations)))
+	// Show analysis start with observation count
+	e.display.AnalysisStart(len(observations))
 
 	// Find subsequent plans in this phase and future phases
 	subsequentPlans := e.findSubsequentPlans(phase, plan)
 	if len(subsequentPlans) == 0 {
-		e.display.Info("Analysis", "No subsequent plans to analyze")
+		e.display.Analysis("No subsequent plans to analyze")
 		return result
 	}
 
@@ -107,7 +108,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 
 	// Count modified plans by checking git status or similar
 	// For now, we trust the analysis agent updated what was needed
-	e.display.Info("Analysis", "Analysis complete")
+	e.display.AnalysisComplete(result.PlansModified, result.NewPlansCreated)
 
 	// Check if phase is complete and needs verification plan
 	created, err := e.MaybeCreateVerificationPlan(phase)

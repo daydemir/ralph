@@ -123,6 +123,9 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		fmt.Sprintf("Executing: %s", plan.Name),
 		fmt.Sprintf("Phase %d, Plan %s", phase.Number, plan.Number))
 
+	// Show Claude execution start
+	e.display.ClaudeStart()
+
 	// Build the execution prompt
 	prompt := e.buildExecutionPrompt(plan.Path)
 

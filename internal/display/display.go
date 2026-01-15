@@ -113,25 +113,76 @@ func (d *Display) Resume(message string) {
 	d.RalphStatus(d.theme.Info(SymbolResume), message)
 }
 
-// Claude prints Claude Code output (indented, dimmer timestamp)
+// ClaudeStart prints a header when Claude execution begins
+func (d *Display) ClaudeStart() {
+	timestamp := time.Now().Format("[15:04:05]")
+	fmt.Printf("  %s %s Sending to Claude...\n",
+		d.theme.Dim(timestamp),
+		d.theme.ClaudeTimestamp(GutterClaude))
+}
+
+// wrapText wraps text to specified width, returns up to maxLines
+func (d *Display) wrapText(text string, maxWidth int) []string {
+	if maxWidth <= 0 {
+		maxWidth = 80
+	}
+
+	text = strings.TrimSpace(text)
+	if len(text) <= maxWidth {
+		return []string{text}
+	}
+
+	var lines []string
+	words := strings.Fields(text)
+	var currentLine strings.Builder
+
+	for _, word := range words {
+		if currentLine.Len()+len(word)+1 > maxWidth {
+			if currentLine.Len() > 0 {
+				lines = append(lines, currentLine.String())
+				currentLine.Reset()
+			}
+		}
+		if currentLine.Len() > 0 {
+			currentLine.WriteString(" ")
+		}
+		currentLine.WriteString(word)
+	}
+	if currentLine.Len() > 0 {
+		lines = append(lines, currentLine.String())
+	}
+
+	// Limit to 5 lines
+	if len(lines) > 5 {
+		lines = lines[:5]
+		if len(lines[4]) > maxWidth-3 {
+			lines[4] = lines[4][:maxWidth-3]
+		}
+		lines[4] = lines[4] + "..."
+	}
+
+	return lines
+}
+
+// Claude prints Claude Code output with left gutter indicator
 func (d *Display) Claude(text string, toolCount int) {
 	timestamp := time.Now().Format("[15:04:05]")
+	gutter := d.theme.ClaudeTimestamp(GutterClaude)
 
-	var line string
+	toolStr := ""
 	if toolCount > 0 {
-		toolStr := fmt.Sprintf("[Tools: %d]", toolCount)
-		line = fmt.Sprintf("%s%s %s %s",
-			IndentClaude,
-			d.theme.ClaudeTimestamp(timestamp),
-			d.theme.ClaudeToolCount(toolStr),
-			d.theme.ClaudeText(text))
-	} else {
-		line = fmt.Sprintf("%s%s %s",
-			IndentClaude,
-			d.theme.ClaudeTimestamp(timestamp),
-			d.theme.ClaudeText(text))
+		toolStr = fmt.Sprintf(" %s", d.theme.ClaudeToolCount(fmt.Sprintf("[%d]", toolCount)))
 	}
-	fmt.Println(line)
+
+	lines := d.wrapText(text, d.termWidth-20)
+
+	for i, line := range lines {
+		if i == 0 {
+			fmt.Printf("  %s %s%s %s\n", gutter, d.theme.Dim(timestamp), toolStr, d.theme.ClaudeText(line))
+		} else {
+			fmt.Printf("  %s %s%s\n", d.theme.ClaudeTimestamp(GutterDot), strings.Repeat(" ", 10), d.theme.ClaudeText(line))
+		}
+	}
 }
 
 // ClaudeDone prints Claude completion message (indented)
@@ -238,4 +289,34 @@ func CleanText(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return strings.TrimSpace(s)
+}
+
+// AnalysisStart prints header when analysis begins
+func (d *Display) AnalysisStart(observationCount int) {
+	timestamp := time.Now().Format("[15:04:05]")
+	fmt.Printf("\n%s %s %s\n",
+		d.theme.Dim(timestamp),
+		d.theme.AnalysisGutter(GutterAnalysis),
+		d.theme.AnalysisText(fmt.Sprintf("Analyzing %d observations...", observationCount)))
+}
+
+// Analysis prints analysis output with distinct styling
+func (d *Display) Analysis(text string) {
+	lines := d.wrapText(text, d.termWidth-15)
+	for i, line := range lines {
+		if i == 0 {
+			fmt.Printf("  %s %s\n", d.theme.AnalysisGutter(GutterAnalysis), d.theme.AnalysisText(line))
+		} else {
+			fmt.Printf("  %s %s\n", d.theme.AnalysisGutter(GutterDot), d.theme.AnalysisText(line))
+		}
+	}
+}
+
+// AnalysisComplete prints analysis completion
+func (d *Display) AnalysisComplete(modified, newPlans int) {
+	timestamp := time.Now().Format("[15:04:05]")
+	fmt.Printf("%s %s %s\n",
+		d.theme.Dim(timestamp),
+		d.theme.AnalysisGutter(GutterAnalysis),
+		d.theme.Success(fmt.Sprintf("Analysis complete (modified: %d, new: %d)", modified, newPlans)))
 }

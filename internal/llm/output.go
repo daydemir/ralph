@@ -80,6 +80,7 @@ type ConsoleHandler struct {
 	tokenThreshold    int
 	planComplete      bool
 	bailoutSignal     *FailureSignal // Separate tracking for BAILOUT (soft failure)
+	lastDoneText      string         // Track last done message to prevent duplicates
 }
 
 func NewConsoleHandler() *ConsoleHandler {
@@ -121,6 +122,13 @@ func (h *ConsoleHandler) OnSelectedPRD(id string) {
 
 func (h *ConsoleHandler) OnDone(result string) {
 	truncated := display.Truncate(result, 200)
+
+	// Skip if identical to last done message
+	if truncated == h.lastDoneText {
+		return
+	}
+	h.lastDoneText = truncated
+
 	h.display.ClaudeDone(truncated)
 }
 
