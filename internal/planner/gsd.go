@@ -160,28 +160,28 @@ func (g *GSD) MapCodebase(ctx context.Context) error {
 }
 
 // ResearchPhase runs /gsd:research-phase N (requires ROADMAP.md)
-func (g *GSD) ResearchPhase(ctx context.Context, phase int) error {
+func (g *GSD) ResearchPhase(ctx context.Context, phase string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:research-phase %d", phase))
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:research-phase %s", phase))
 }
 
 // DiscussPhase runs /gsd:discuss-phase N (requires ROADMAP.md)
-func (g *GSD) DiscussPhase(ctx context.Context, phase int) error {
+func (g *GSD) DiscussPhase(ctx context.Context, phase string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:discuss-phase %d", phase))
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:discuss-phase %s", phase))
 }
 
 // PlanPhase runs /gsd:plan-phase N (requires ROADMAP.md)
 // After planning, syncs ROADMAP.md with actual plan names
-func (g *GSD) PlanPhase(ctx context.Context, phase int) error {
+func (g *GSD) PlanPhase(ctx context.Context, phase string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	if err := g.RunCommand(ctx, fmt.Sprintf("/gsd:plan-phase %d", phase)); err != nil {
+	if err := g.RunCommand(ctx, fmt.Sprintf("/gsd:plan-phase %s", phase)); err != nil {
 		return err
 	}
 	// Sync ROADMAP.md with actual plan files
@@ -197,19 +197,19 @@ func (g *GSD) AddPhase(ctx context.Context, description string) error {
 }
 
 // InsertPhase runs /gsd:insert-phase N "description" (requires ROADMAP.md)
-func (g *GSD) InsertPhase(ctx context.Context, afterPhase int, description string) error {
+func (g *GSD) InsertPhase(ctx context.Context, afterPhase string, description string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:insert-phase %d \"%s\"", afterPhase, description))
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:insert-phase %s \"%s\"", afterPhase, description))
 }
 
 // RemovePhase runs /gsd:remove-phase N (requires ROADMAP.md)
-func (g *GSD) RemovePhase(ctx context.Context, phase int) error {
+func (g *GSD) RemovePhase(ctx context.Context, phase string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:remove-phase %d", phase))
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:remove-phase %s", phase))
 }
 
 // Progress runs /gsd:progress
@@ -218,11 +218,11 @@ func (g *GSD) Progress(ctx context.Context) error {
 }
 
 // ReviewPlans runs /gsd:review-plans N (requires plans to exist)
-func (g *GSD) ReviewPlans(ctx context.Context, phase int) error {
+func (g *GSD) ReviewPlans(ctx context.Context, phase string) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err
 	}
-	return g.RunCommand(ctx, fmt.Sprintf("/gsd:review-plans %d", phase))
+	return g.RunCommand(ctx, fmt.Sprintf("/gsd:review-plans %s", phase))
 }
 
 // UpdateRoadmap runs /gsd:update-roadmap (requires ROADMAP.md)
@@ -244,8 +244,14 @@ Then restart your terminal, or run:
 }
 
 // SyncRoadmap updates ROADMAP.md to reflect actual plan files created
-func (g *GSD) SyncRoadmap(phase int) error {
+func (g *GSD) SyncRoadmap(phase string) error {
 	roadmapPath := filepath.Join(g.PlanningDir(), "ROADMAP.md")
+
+	// Parse phase string to get major phase number
+	majorPhase := 0
+	if parts := strings.Split(phase, "."); len(parts) >= 1 {
+		majorPhase, _ = strconv.Atoi(parts[0])
+	}
 
 	// Read current ROADMAP.md
 	content, err := os.ReadFile(roadmapPath)
@@ -260,9 +266,9 @@ func (g *GSD) SyncRoadmap(phase int) error {
 		return nil // No phases directory yet
 	}
 
-	// Find the phase directory
+	// Find the phase directory (use major phase for directory lookup)
 	var phaseDir string
-	phasePrefix := fmt.Sprintf("%02d", phase)
+	phasePrefix := fmt.Sprintf("%02d", majorPhase)
 	for _, entry := range entries {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), phasePrefix) {
 			phaseDir = filepath.Join(phasesDir, entry.Name())
@@ -335,8 +341,10 @@ func (g *GSD) SyncRoadmap(phase int) error {
 	// Update ROADMAP.md content
 	lines := strings.Split(string(content), "\n")
 	inPhase := false
-	phaseMarker := fmt.Sprintf("## Phase %d", phase)
-	nextPhaseMarker := fmt.Sprintf("## Phase %d", phase+1)
+	// Support both integer and decimal phase markers
+	phaseMarker := fmt.Sprintf("## Phase %s", phase)
+	nextMajorPhase := majorPhase + 1
+	nextPhaseMarker := fmt.Sprintf("## Phase %d", nextMajorPhase)
 
 	var newLines []string
 	planIndex := 0
@@ -357,7 +365,7 @@ func (g *GSD) SyncRoadmap(phase int) error {
 		}
 
 		// Replace plan lines within the phase
-		if inPhase && strings.HasPrefix(trimmed, fmt.Sprintf("%02d-%02d:", phase, 1)) {
+		if inPhase && strings.HasPrefix(trimmed, fmt.Sprintf("%02d-%02d:", majorPhase, 1)) {
 			// Skip old plan lines - we'll add new ones
 			continue
 		}
@@ -366,7 +374,7 @@ func (g *GSD) SyncRoadmap(phase int) error {
 		if inPhase && (trimmed == "" || strings.HasPrefix(trimmed, "## Phase")) && planIndex == 0 && len(plans) > 0 {
 			// Insert actual plan entries
 			for _, p := range plans {
-				newLines = append(newLines, fmt.Sprintf("  %02d-%02d: %s", phase, p.number, p.title))
+				newLines = append(newLines, fmt.Sprintf("  %02d-%02d: %s", majorPhase, p.number, p.title))
 			}
 			planIndex = len(plans) // Mark as inserted
 		}

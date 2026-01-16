@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/spf13/cobra"
@@ -25,12 +23,14 @@ This removes Phase 5 and renumbers subsequent phases:
   - Phase 7 becomes Phase 6
   - etc.
 
-Use with caution - this deletes the phase directory and all plans within.`,
+Use with caution - this deletes the phase directory and all plans within.
+
+Accepts both integer (5) and decimal (5.1) phase numbers.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		phase, err := strconv.Atoi(args[0])
+		phase, err := ValidatePhaseNumber(args[0])
 		if err != nil {
-			return fmt.Errorf("invalid phase number: %s", args[0])
+			return err
 		}
 
 		cwd, err := os.Getwd()

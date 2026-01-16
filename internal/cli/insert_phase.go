@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/daydemir/ralph/internal/planner"
@@ -24,12 +23,14 @@ Example:
 This creates Phase 3.1 between Phase 3 and Phase 4.
 Other phases don't renumber - you can have 3.1, 3.2, etc.
 
-Great for urgent work that can't wait until the next full phase.`,
+Great for urgent work that can't wait until the next full phase.
+
+Accepts both integer (5) and decimal (5.1) phase numbers.`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		afterPhase, err := strconv.Atoi(args[0])
+		afterPhase, err := ValidatePhaseNumber(args[0])
 		if err != nil {
-			return fmt.Errorf("invalid phase number: %s", args[0])
+			return err
 		}
 
 		description := strings.Join(args[1:], " ")

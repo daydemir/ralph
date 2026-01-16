@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/spf13/cobra"
@@ -26,12 +24,14 @@ For each plan, you'll see:
 Your feedback is captured verbatim AND used to update plans directly.
 This is the quality gate between planning and execution.
 
-After reviewing, run 'ralph run' to start execution.`,
+After reviewing, run 'ralph run' to start execution.
+
+Accepts both integer (5) and decimal (5.1) phase numbers.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		phase, err := strconv.Atoi(args[0])
+		phase, err := ValidatePhaseNumber(args[0])
 		if err != nil {
-			return fmt.Errorf("invalid phase number: %s", args[0])
+			return err
 		}
 
 		cwd, err := os.Getwd()
