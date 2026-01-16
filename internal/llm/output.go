@@ -251,9 +251,9 @@ func (h *ConsoleHandler) GetBailout() *FailureSignal {
 // to allow the caller to cancel the context and kill the Claude process
 func ParseStream(reader io.Reader, handler OutputHandler, onTerminate func()) error {
 	scanner := bufio.NewScanner(reader)
-	// Increase buffer size for large JSON lines
+	// Increase buffer size for large JSON lines (handles Playwright screenshots up to 16MB base64)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(buf, 16*1024*1024)
 
 	prdPattern := regexp.MustCompile(`SELECTED_PRD:\s*([a-zA-Z0-9_-]+)`)
 	iterationPattern := regexp.MustCompile(`###ITERATION_COMPLETE###`)
