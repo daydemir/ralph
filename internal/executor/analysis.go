@@ -24,6 +24,22 @@ type Observation struct {
 	Action   string // needs-fix, needs-implementation, needs-plan, needs-investigation, none
 }
 
+// ExecutionContext holds context about a failed execution for recovery analysis
+type ExecutionContext struct {
+	Error             error
+	CapturedLogs      []string // Everything Claude output before failing
+	LastToolCall      string   // What tool was Claude trying to use
+	ClaudeCodeLogs    string   // Fallback: Claude Code's own conversation logs
+	FailureSignalType string   // Type of failure signal (task_failed, blocked, etc.)
+}
+
+// RecoveryAction represents what to do after a failed execution
+type RecoveryAction struct {
+	Action   string // retry, fix-state, break-into-chunks, skip, manual-intervention
+	Guidance string // Specific guidance on how to proceed
+	Reason   string // Why this action was chosen
+}
+
 // AnalysisResult holds the result of post-run analysis
 type AnalysisResult struct {
 	ObservationsFound int
@@ -859,4 +875,265 @@ func (h *blockerAnalysisHandler) OnText(text string) {
 func (h *blockerAnalysisHandler) OnDone(result string) {
 	h.outputBuilder.WriteString(result)
 	h.ConsoleHandler.OnDone(result)
+}
+
+// DecideRecovery analyzes execution failure context and decides how to proceed
+func (e *Executor) DecideRecovery(ctx context.Context, execCtx ExecutionContext, plan *state.Plan) (*RecoveryAction, error) {
+	e.display.Info("Recovery Analysis", "Analyzing execution failure context")
+
+	// Build prompt with error context + logs from multiple sources
+	prompt := buildRecoveryPrompt(execCtx, plan)
+
+	// Execute recovery analysis with Claude
+	opts := llm.ExecuteOptions{
+		Prompt: prompt,
+		ContextFiles: []string{
+			plan.Path,
+			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+		},
+		Model: e.config.Model,
+		AllowedTools: []string{
+			"Read", "Glob", "Grep", "Bash",
+		},
+		WorkDir: e.config.WorkDir,
+	}
+
+	reader, err := e.claude.Execute(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("recovery analysis execution failed: %w", err)
+	}
+	defer reader.Close()
+
+	// Parse the stream output and capture the decision
+	handler := llm.NewConsoleHandlerWithDisplay(e.display)
+
+	var outputBuilder strings.Builder
+	customHandler := &recoveryAnalysisHandler{
+		ConsoleHandler: handler,
+		outputBuilder:  &outputBuilder,
+	}
+
+	if err := llm.ParseStream(reader, customHandler, nil); err != nil {
+		return nil, fmt.Errorf("recovery analysis stream parsing failed: %w", err)
+	}
+
+	// Parse the output for recovery decision signals
+	output := outputBuilder.String()
+
+	return parseRecoveryDecision(output, e.display)
+}
+
+// buildRecoveryPrompt creates the prompt for recovery decision analysis
+func buildRecoveryPrompt(execCtx ExecutionContext, plan *state.Plan) string {
+	// Join captured logs with newlines
+	logsText := strings.Join(execCtx.CapturedLogs, "\n")
+
+	// Truncate logs if too long (keep last 10KB for context)
+	if len(logsText) > 10000 {
+		logsText = "...[truncated]...\n" + logsText[len(logsText)-10000:]
+	}
+
+	claudeCodeLogsSection := ""
+	if execCtx.ClaudeCodeLogs != "" {
+		claudeCodeLogsSection = fmt.Sprintf(`
+Claude Code conversation logs (fallback source):
+%s
+`, execCtx.ClaudeCodeLogs)
+	}
+
+	return fmt.Sprintf(`You are a recovery decision agent. An execution just failed, and you need to decide how to proceed.
+
+## Execution Failure
+
+**Error:** %s
+**Failure Type:** %s
+**Last Tool Called:** %s
+**Plan:** %s
+
+## Captured Output
+
+Ralph captured logs (Claude's output before failure):
+%s
+%s
+
+## Your Task
+
+Analyze the failure context and decide what to do next.
+
+### Recovery Options
+
+1. **RETRY** - Try the same task again (with optional guidance)
+   - Use when: Transient error, network issue, timing problem
+   - Signal: ###RECOVERY:retry:{guidance}###
+
+2. **FIX_STATE** - Fix a corrupted file or state first, then retry
+   - Use when: File is corrupted, state is inconsistent, bad data written
+   - Signal: ###RECOVERY:fix-state:{what to fix}###
+
+3. **BREAK_CHUNKS** - Break the work into smaller pieces
+   - Use when: Task is too large, context overflow, complexity issue
+   - Signal: ###RECOVERY:break-chunks:{how to split}###
+
+4. **SKIP** - Skip this task and continue
+   - Use when: Task is optional, blocker is external, not critical for progress
+   - Signal: ###RECOVERY:skip:{reason}###
+
+5. **MANUAL** - Needs human intervention
+   - Use when: Requires credentials, external approval, human decision
+   - Signal: ###RECOVERY:manual:{what needs human action}###
+
+### Analysis Guidelines
+
+Look for these patterns in the captured logs:
+
+**Stream parsing errors:**
+- "bufio.Scanner: token too long" → likely large output, may need different approach
+- "unexpected EOF" → connection lost, retry may work
+- JSON parsing errors → output format issue, may need guidance
+
+**Tool execution errors:**
+- "command not found" → missing dependency, needs fix-state
+- "permission denied" → needs credentials or manual intervention
+- "timeout" → may need smaller chunks or retry
+
+**Claude's own errors:**
+- "I tried X but Y happened" → Claude documented the issue, extract guidance
+- Repeated failed attempts → may need different approach or break into chunks
+- "I'm blocked by Z" → analyze if truly blocked or can be worked around
+
+### Output Format
+
+After analysis, output EXACTLY ONE recovery signal:
+
+###RECOVERY:{action}:{guidance}###
+
+Where action is one of: retry, fix-state, break-chunks, skip, manual
+
+Example signals:
+- ###RECOVERY:retry:Use --force flag to bypass cache###
+- ###RECOVERY:fix-state:Delete corrupted .planning/STATE.md and regenerate###
+- ###RECOVERY:break-chunks:Split into 3 smaller tasks: auth, validation, response###
+- ###RECOVERY:skip:Test requires GPU which is not available###
+- ###RECOVERY:manual:Need API credentials for external service###
+
+Begin analysis now.
+`, execCtx.Error, execCtx.FailureSignalType, execCtx.LastToolCall, plan.Path, logsText, claudeCodeLogsSection)
+}
+
+// parseRecoveryDecision extracts recovery action from analyzer output
+func parseRecoveryDecision(output string, disp *display.Display) (*RecoveryAction, error) {
+	// Pattern: ###RECOVERY:{action}:{guidance}###
+	pattern := regexp.MustCompile(`###RECOVERY:([^:]+):([^#]+)###`)
+
+	match := pattern.FindStringSubmatch(output)
+	if len(match) < 3 {
+		return nil, fmt.Errorf("no recovery decision found in analyzer output")
+	}
+
+	action := strings.TrimSpace(match[1])
+	guidance := strings.TrimSpace(match[2])
+
+	// Validate action
+	validActions := map[string]bool{
+		"retry":        true,
+		"fix-state":    true,
+		"break-chunks": true,
+		"skip":         true,
+		"manual":       true,
+	}
+
+	if !validActions[action] {
+		return nil, fmt.Errorf("invalid recovery action: %s", action)
+	}
+
+	disp.Info("Recovery Decision", fmt.Sprintf("Action: %s | Guidance: %s", action, guidance))
+
+	return &RecoveryAction{
+		Action:   action,
+		Guidance: guidance,
+		Reason:   fmt.Sprintf("Analyzer decided: %s", guidance),
+	}, nil
+}
+
+// recoveryAnalysisHandler wraps ConsoleHandler to capture output text
+type recoveryAnalysisHandler struct {
+	*llm.ConsoleHandler
+	outputBuilder *strings.Builder
+}
+
+func (h *recoveryAnalysisHandler) OnText(text string) {
+	h.outputBuilder.WriteString(text)
+	h.ConsoleHandler.OnText(text)
+}
+
+func (h *recoveryAnalysisHandler) OnDone(result string) {
+	h.outputBuilder.WriteString(result)
+	h.ConsoleHandler.OnDone(result)
+}
+
+// getClaudeCodeLogs attempts to read Claude Code's conversation logs as a fallback
+// Returns empty string if logs cannot be found or read
+func getClaudeCodeLogs(workDir string) string {
+	// Claude Code stores conversation logs in ~/.claude/projects/<project>/conversations/
+	// Try to find the most recent conversation log
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	// Get project name from workDir (basename)
+	projectName := filepath.Base(workDir)
+	conversationsDir := filepath.Join(homeDir, ".claude", "projects", projectName, "conversations")
+
+	// Check if directory exists
+	if _, err := os.Stat(conversationsDir); os.IsNotExist(err) {
+		return ""
+	}
+
+	// Find most recent conversation file
+	entries, err := os.ReadDir(conversationsDir)
+	if err != nil {
+		return ""
+	}
+
+	if len(entries) == 0 {
+		return ""
+	}
+
+	// Get the most recent file (they're typically timestamped)
+	var mostRecent os.DirEntry
+	var mostRecentTime int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Unix() > mostRecentTime {
+			mostRecentTime = info.ModTime().Unix()
+			mostRecent = entry
+		}
+	}
+
+	if mostRecent == nil {
+		return ""
+	}
+
+	// Read the log file (limit to last 50KB to avoid huge context)
+	logPath := filepath.Join(conversationsDir, mostRecent.Name())
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+
+	// Truncate to last 50KB if larger
+	if len(content) > 50000 {
+		content = content[len(content)-50000:]
+		return "...[truncated]...\n" + string(content)
+	}
+
+	return string(content)
 }

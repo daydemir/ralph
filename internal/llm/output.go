@@ -114,6 +114,8 @@ type ConsoleHandler struct {
 	bailoutSignal     *FailureSignal // Separate tracking for BAILOUT (soft failure)
 	lastDoneText      string         // Track last done message to prevent duplicates
 	onTerminate       func()         // Callback to kill Claude process when token limit exceeded
+	capturedOutput    []string       // All output text for error recovery
+	lastToolCall      string         // Last tool that was called
 }
 
 func NewConsoleHandler() *ConsoleHandler {
@@ -150,9 +152,13 @@ func NewConsoleHandlerWithTerminate(d *display.Display, onTerminate func()) *Con
 
 func (h *ConsoleHandler) OnToolUse(name string) {
 	h.toolCount++
+	h.lastToolCall = name
 }
 
 func (h *ConsoleHandler) OnText(text string) {
+	// Capture full output for error recovery
+	h.capturedOutput = append(h.capturedOutput, text)
+
 	truncated := display.Truncate(text, 400)
 	h.display.ClaudeWithTokens(truncated, h.toolCount, display.TokenStats{
 		TotalTokens: h.tokenStats.TotalTokens,
@@ -166,6 +172,9 @@ func (h *ConsoleHandler) OnSelectedPRD(id string) {
 }
 
 func (h *ConsoleHandler) OnDone(result string) {
+	// Capture full output for error recovery
+	h.capturedOutput = append(h.capturedOutput, result)
+
 	truncated := display.Truncate(result, 200)
 
 	// Skip if identical to last done message
@@ -244,6 +253,16 @@ func (h *ConsoleHandler) IsBailout() bool {
 // GetBailout returns the bailout signal details
 func (h *ConsoleHandler) GetBailout() *FailureSignal {
 	return h.bailoutSignal
+}
+
+// GetCapturedOutput returns all captured output for error recovery
+func (h *ConsoleHandler) GetCapturedOutput() []string {
+	return h.capturedOutput
+}
+
+// GetLastToolCall returns the name of the last tool that was called
+func (h *ConsoleHandler) GetLastToolCall() string {
+	return h.lastToolCall
 }
 
 // ParseStream reads the Claude stream-json output and calls the handler

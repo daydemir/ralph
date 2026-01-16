@@ -166,6 +166,22 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	// Run Claude in streaming mode to capture output and signals
 	reader, err := e.claude.Execute(execCtx, opts)
 	if err != nil {
+		// Execution failed to start - give analyzer context to decide recovery
+		execContext := ExecutionContext{
+			Error:             err,
+			CapturedLogs:      []string{}, // No output captured if execution didn't start
+			LastToolCall:      "",
+			ClaudeCodeLogs:    getClaudeCodeLogs(e.config.WorkDir),
+			FailureSignalType: "execution_start_failure",
+		}
+
+		// Try to get recovery guidance from analyzer
+		recoveryAction, recoveryErr := e.DecideRecovery(ctx, execContext, plan)
+		if recoveryErr == nil {
+			result.LastOutput = fmt.Sprintf("Recovery: %s | %s", recoveryAction.Action, recoveryAction.Guidance)
+			e.display.Info("Recovery", fmt.Sprintf("%s: %s", recoveryAction.Action, recoveryAction.Guidance))
+		}
+
 		result.Error = fmt.Errorf("execution failed: %w", err)
 		e.display.Error(fmt.Sprintf("Execution failed: %v", err))
 		result.Duration = time.Since(start)
@@ -176,6 +192,23 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	// Parse the stream output, with termination callback for failure/bailout signals
 	handler := llm.NewConsoleHandlerWithTerminate(e.display, cancelExec)
 	if err := llm.ParseStream(reader, handler, cancelExec); err != nil {
+		// Stream parsing failed - give analyzer context to decide recovery
+		execContext := ExecutionContext{
+			Error:             err,
+			CapturedLogs:      handler.GetCapturedOutput(),
+			LastToolCall:      handler.GetLastToolCall(),
+			ClaudeCodeLogs:    getClaudeCodeLogs(e.config.WorkDir),
+			FailureSignalType: "stream_parsing_error",
+		}
+
+		// Try to get recovery guidance from analyzer
+		recoveryAction, recoveryErr := e.DecideRecovery(ctx, execContext, plan)
+		if recoveryErr == nil {
+			// Store recovery guidance in LastOutput for retry logic
+			result.LastOutput = fmt.Sprintf("Recovery: %s | %s", recoveryAction.Action, recoveryAction.Guidance)
+			e.display.Info("Recovery", fmt.Sprintf("%s: %s", recoveryAction.Action, recoveryAction.Guidance))
+		}
+
 		result.Error = fmt.Errorf("stream parsing failed: %w", err)
 		e.display.Error(fmt.Sprintf("Stream parsing failed: %v", err))
 		result.Duration = time.Since(start)
@@ -216,6 +249,22 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			}
 		} else {
 			// Non-blocker hard failure - task/plan/build/test failed
+			// Give analyzer context to suggest recovery
+			execContext := ExecutionContext{
+				Error:             fmt.Errorf("%s: %s", failure.Type, failure.Detail),
+				CapturedLogs:      handler.GetCapturedOutput(),
+				LastToolCall:      handler.GetLastToolCall(),
+				ClaudeCodeLogs:    getClaudeCodeLogs(e.config.WorkDir),
+				FailureSignalType: string(failure.Type),
+			}
+
+			// Try to get recovery guidance from analyzer
+			recoveryAction, recoveryErr := e.DecideRecovery(ctx, execContext, plan)
+			if recoveryErr == nil {
+				result.LastOutput = fmt.Sprintf("Recovery: %s | %s", recoveryAction.Action, recoveryAction.Guidance)
+				e.display.Info("Recovery", fmt.Sprintf("%s: %s", recoveryAction.Action, recoveryAction.Guidance))
+			}
+
 			result.Error = fmt.Errorf("%s: %s", failure.Type, failure.Detail)
 			result.TasksFailed = []string{failure.Detail}
 			result.FailureType = FailureHard
