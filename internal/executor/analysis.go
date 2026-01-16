@@ -51,7 +51,8 @@ type AnalysisResult struct {
 }
 
 // RunPostAnalysis spawns an agent to analyze observations and potentially update subsequent plans
-func (e *Executor) RunPostAnalysis(ctx context.Context, phase *types.Phase, plan *types.Plan, skipAnalysis bool) *AnalysisResult {
+// If execCtx is provided and contains an error, the error context is included in the analysis prompt
+func (e *Executor) RunPostAnalysis(ctx context.Context, phase *types.Phase, plan *types.Plan, skipAnalysis bool, execCtx *ExecutionContext) *AnalysisResult {
 	result := &AnalysisResult{}
 
 	if skipAnalysis {
@@ -93,8 +94,8 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *types.Phase, plan
 		return result
 	}
 
-	// Build the analysis prompt
-	prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans)
+	// Build the analysis prompt (include execution context if available)
+	prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans, execCtx)
 
 	// Execute analysis with Claude - includes Write tool for plan creation/restructuring
 	opts := llm.ExecuteOptions{
@@ -321,7 +322,7 @@ func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *t
 }
 
 // buildAnalysisPrompt creates the prompt for the post-run analysis agent
-func (e *Executor) buildAnalysisPrompt(plan *types.Plan, observations []Observation, subsequentPlans []string) string {
+func (e *Executor) buildAnalysisPrompt(plan *types.Plan, observations []Observation, subsequentPlans []string, execCtx *ExecutionContext) string {
 	var observationsText strings.Builder
 	for i, o := range observations {
 		observationsText.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, o.Type, o.Title))
@@ -332,7 +333,31 @@ func (e *Executor) buildAnalysisPrompt(plan *types.Plan, observations []Observat
 		observationsText.WriteString("\n")
 	}
 
-	return fmt.Sprintf(`You are analyzing observations from a completed plan execution.
+	// Build execution error section if context contains an error
+	var executionErrorSection string
+	if execCtx != nil && execCtx.Error != nil {
+		executionErrorSection = fmt.Sprintf(`
+
+## Execution Error
+
+The execution was interrupted with an error. This context is crucial for understanding what happened:
+
+**Error:** %s
+**Failure Type:** %s
+**Last Tool Call:** %s
+
+### Captured Logs (last output before failure)
+%s
+
+This error context should inform your analysis:
+- If the error is a stream parsing issue (e.g., "token too long"), the execution may have been doing something that generated large output
+- If the error is a tool execution failure, check if subsequent plans might hit the same issue
+- Consider whether this error indicates a systemic problem that needs addressing
+
+`, execCtx.Error, execCtx.FailureSignalType, execCtx.LastToolCall, strings.Join(execCtx.CapturedLogs, "\n"))
+	}
+
+	return fmt.Sprintf(`You are analyzing observations from a completed plan execution.%s
 
 ## Just-Completed Plan
 %s
@@ -513,7 +538,7 @@ When done analyzing, output a brief summary:
 - Any critical issues that need immediate attention
 
 Signal completion with: ###ANALYSIS_COMPLETE###
-`, plan.Path, observationsText.String(), strings.Join(subsequentPlans, "\n"))
+`, executionErrorSection, plan.Path, observationsText.String(), strings.Join(subsequentPlans, "\n"))
 }
 
 // HasActionableObservations returns true if any observations are blockers or findings

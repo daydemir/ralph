@@ -1,7 +1,11 @@
 package executor
 
 import (
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/daydemir/ralph/internal/types"
 )
 
 func TestParseSummaryObservations(t *testing.T) {
@@ -214,4 +218,81 @@ func TestFilterByType(t *testing.T) {
 	if len(completions) != 1 {
 		t.Errorf("Expected 1 completion, got %d", len(completions))
 	}
+}
+
+// TestBuildAnalysisPromptWithExecutionContext tests that execution errors are included in analysis prompt
+// This is a regression test for GitHub Issue #12: Stream parsing errors not visible to analyzer
+func TestBuildAnalysisPromptWithExecutionContext(t *testing.T) {
+	// Create a mock executor for testing
+	e := &Executor{}
+
+	plan := &types.Plan{
+		Path:       "/test/plan.json",
+		PlanNumber: "01",
+		Objective:  "Test plan",
+	}
+
+	observations := []Observation{
+		{Type: "finding", Title: "Test finding", Description: "Some finding"},
+	}
+
+	subsequentPlans := []string{"/test/plan-02.json"}
+
+	t.Run("includes error context when execCtx has error", func(t *testing.T) {
+		execCtx := &ExecutionContext{
+			Error:             errors.New("bufio.Scanner: token too long"),
+			CapturedLogs:      []string{"Last output line 1", "Last output line 2"},
+			LastToolCall:      "Bash",
+			FailureSignalType: "stream_parsing_error",
+		}
+
+		prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans, execCtx)
+
+		// Verify error is included in prompt
+		if !strings.Contains(prompt, "bufio.Scanner: token too long") {
+			t.Error("Expected prompt to contain the error message")
+		}
+
+		// Verify failure type is included
+		if !strings.Contains(prompt, "stream_parsing_error") {
+			t.Error("Expected prompt to contain the failure type")
+		}
+
+		// Verify last tool call is included
+		if !strings.Contains(prompt, "Bash") {
+			t.Error("Expected prompt to contain the last tool call")
+		}
+
+		// Verify captured logs are included
+		if !strings.Contains(prompt, "Last output line 1") {
+			t.Error("Expected prompt to contain captured logs")
+		}
+
+		// Verify execution error section header is present
+		if !strings.Contains(prompt, "## Execution Error") {
+			t.Error("Expected prompt to contain execution error section header")
+		}
+	})
+
+	t.Run("no error section when execCtx is nil", func(t *testing.T) {
+		prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans, nil)
+
+		// Verify no execution error section
+		if strings.Contains(prompt, "## Execution Error") {
+			t.Error("Expected no execution error section when execCtx is nil")
+		}
+	})
+
+	t.Run("no error section when execCtx has no error", func(t *testing.T) {
+		execCtx := &ExecutionContext{
+			Error: nil,
+		}
+
+		prompt := e.buildAnalysisPrompt(plan, observations, subsequentPlans, execCtx)
+
+		// Verify no execution error section
+		if strings.Contains(prompt, "## Execution Error") {
+			t.Error("Expected no execution error section when execCtx has no error")
+		}
+	})
 }

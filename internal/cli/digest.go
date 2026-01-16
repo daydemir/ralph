@@ -151,7 +151,7 @@ Examples:
 		exec := executor.New(config)
 
 		ctx := context.Background()
-		result := exec.RunPostAnalysis(ctx, targetPhase, targetPlan, false)
+		result := exec.RunPostAnalysis(ctx, targetPhase, targetPlan, false, nil)
 
 		if result.Error != nil {
 			return fmt.Errorf("analysis failed: %w", result.Error)

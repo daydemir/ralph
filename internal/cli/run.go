@@ -110,7 +110,7 @@ Then run 'ralph discuss' again to create plans for Phase 1.`)
 		}
 
 		// Run post-analysis to check observations and update subsequent plans
-		analysisResult := exec.RunPostAnalysis(ctx, phase, plan, runSkipAnalysis)
+		analysisResult := exec.RunPostAnalysis(ctx, phase, plan, runSkipAnalysis, nil)
 		if analysisResult.Error != nil {
 			disp.Warning(fmt.Sprintf("Post-analysis failed: %v", analysisResult.Error))
 		} else if analysisResult.ObservationsFound > 0 {

@@ -261,20 +261,43 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *types.Phase, plan *ty
 			statusLines = append(statusLines,
 				fmt.Sprintf("%s Plan signaled complete but summary.json missing", e.display.Theme().Warning(display.SymbolWarning)))
 		} else {
-			// Success - explicit completion signal with summary.json verified
-			result.Success = true
-			result.FailureType = FailureNone
-			statusLines = append(statusLines,
-				fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
-
-			// Update state.json and roadmap.json
-			if err := e.updateStateAndRoadmap(phase, plan); err != nil {
-				e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+			// Execute mandatory validation commands before marking complete
+			validationPassed := true
+			if len(plan.ValidationCommands) > 0 {
+				e.display.Info("Validation", fmt.Sprintf("Running %d mandatory validations...", len(plan.ValidationCommands)))
+				for i, cmd := range plan.ValidationCommands {
+					e.display.Info("Validation", fmt.Sprintf("[%d/%d] %s", i+1, len(plan.ValidationCommands), cmd))
+					out, err := exec.Command("bash", "-c", cmd).CombinedOutput()
+					if err != nil {
+						result.Error = fmt.Errorf("validation %d failed: %s\nOutput: %s", i+1, cmd, string(out))
+						result.FailureType = FailureSoft // Soft failure allows retry
+						result.LastOutput = fmt.Sprintf("Validation failed: %s", cmd)
+						statusLines = append(statusLines,
+							fmt.Sprintf("%s Validation failed: %s", e.display.Theme().Warning(display.SymbolWarning), cmd))
+						validationPassed = false
+						break
+					}
+					e.display.Success(fmt.Sprintf("Validation %d passed", i+1))
+				}
 			}
 
-			// Commit and push all repos
-			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
-			e.CommitAndPushRepos(planId)
+			// Only mark complete if all validations passed
+			if validationPassed {
+				// Success - explicit completion signal with summary.json and validations verified
+				result.Success = true
+				result.FailureType = FailureNone
+				statusLines = append(statusLines,
+					fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
+
+				// Update state.json and roadmap.json
+				if err := e.updateStateAndRoadmap(phase, plan); err != nil {
+					e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+				}
+
+				// Commit and push all repos
+				planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
+				e.CommitAndPushRepos(planId)
+			}
 		}
 	} else if handler.IsBailout() {
 		// Bailout signal - Claude preserved context, check if Progress was updated
@@ -486,8 +509,18 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		// Execute the plan (with retry guidance if this is a retry)
 		result := e.ExecutePlan(ctx, phase, plan)
 
+		// Build execution context for analysis if there was an error
+		var execCtx *ExecutionContext
+		if result.Error != nil {
+			execCtx = &ExecutionContext{
+				Error:             result.Error,
+				CapturedLogs:      []string{result.LastOutput},
+				FailureSignalType: fmt.Sprintf("failure_type_%d", result.FailureType),
+			}
+		}
+
 		// Run post-analysis ALWAYS - even on hard failures - to diagnose issues and update plans
-		analysisResult := e.RunPostAnalysis(ctx, phase, plan, skipAnalysis)
+		analysisResult := e.RunPostAnalysis(ctx, phase, plan, skipAnalysis, execCtx)
 		if analysisResult.Error != nil {
 			e.display.Warning(fmt.Sprintf("Post-analysis failed: %v", analysisResult.Error))
 		} else if analysisResult.ObservationsFound > 0 {
