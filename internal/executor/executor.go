@@ -13,6 +13,7 @@ import (
 	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/llm"
 	"github.com/daydemir/ralph/internal/state"
+	"github.com/daydemir/ralph/internal/types"
 )
 
 // gsdWorkflowPath returns the path to the GSD execute-phase workflow
@@ -286,16 +287,8 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			statusLines = append(statusLines,
 				fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
 
-			// Update STATE.md and ROADMAP.md with new progress
-			phases, _ := state.LoadPhases(e.config.PlanningDir)
-			if err := state.UpdateStateFile(e.config.PlanningDir, phases); err != nil {
-				statusLines = append(statusLines,
-					fmt.Sprintf("%s Failed to update STATE.md: %v", e.display.Theme().Warning(display.SymbolWarning), err))
-			}
-			if err := state.UpdateRoadmap(e.config.PlanningDir, phases); err != nil {
-				statusLines = append(statusLines,
-					fmt.Sprintf("%s Failed to update ROADMAP.md: %v", e.display.Theme().Warning(display.SymbolWarning), err))
-			}
+			// TODO(02-03): Update STATE.md and ROADMAP.md using JSON savers
+			// Will be implemented in plan 02-03 which adds UpdateStateFileJSON/UpdateRoadmapJSON
 
 			// Commit and push all repos
 			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
@@ -382,14 +375,8 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *stat
 			result.FailureType = FailureNone
 			e.display.RalphBox("MANUAL PLAN", "Manual tasks completed successfully")
 
-			// Update STATE.md and ROADMAP.md with new progress
-			phases, _ := state.LoadPhases(e.config.PlanningDir)
-			if err := state.UpdateStateFile(e.config.PlanningDir, phases); err != nil {
-				e.display.Warning(fmt.Sprintf("Failed to update STATE.md: %v", err))
-			}
-			if err := state.UpdateRoadmap(e.config.PlanningDir, phases); err != nil {
-				e.display.Warning(fmt.Sprintf("Failed to update ROADMAP.md: %v", err))
-			}
+			// TODO(02-03): Update STATE.md and ROADMAP.md using JSON savers
+			// Will be implemented in plan 02-03 which adds UpdateStateFileJSON/UpdateRoadmapJSON
 
 			// Commit and push all repos
 			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
@@ -425,18 +412,18 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 	}
 
 	for i := 1; i <= maxIterations; i++ {
-		// Reload phases to get current state
-		phases, err := state.LoadPhases(e.config.PlanningDir)
+		// Find next plan using JSON roadmap
+		phaseData, planData, err := state.FindNextPlanJSON(e.config.PlanningDir)
 		if err != nil {
-			return fmt.Errorf("cannot load phases: %w", err)
+			return fmt.Errorf("cannot find next plan: %w", err)
 		}
-
-		// Find next plan
-		phase, plan := state.FindNextPlan(phases)
-		if plan == nil {
+		if planData == nil {
 			e.display.AllComplete()
 			return nil
 		}
+
+		// Convert to execution-compatible structures with paths
+		phase, plan := convertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
 
 		// Check for stuck loop - same plan found twice with NO progress made
 		// This allows bailout recovery (same plan, but Progress section updated)
@@ -463,19 +450,30 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 			if err := e.RunPhaseStartAnalysis(phase); err != nil {
 				e.display.Warning(fmt.Sprintf("Phase start analysis failed: %v", err))
 			}
-			// Reload phases after analysis may have created new plans
-			phases, err = state.LoadPhases(e.config.PlanningDir)
+			// Reload after analysis may have created new plans
+			phaseData, planData, err := state.FindNextPlanJSON(e.config.PlanningDir)
 			if err != nil {
-				return fmt.Errorf("cannot reload phases after phase start analysis: %w", err)
+				return fmt.Errorf("cannot find next plan after phase start analysis: %w", err)
 			}
-			phase, plan = state.FindNextPlan(phases)
-			if plan == nil {
+			if planData == nil {
 				e.display.AllComplete()
 				return nil
 			}
+			// Convert to execution-compatible structures
+			phase, plan = convertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
 		}
 
-		total, completed := state.CountPlans(phases)
+		// Count plans from roadmap (simplified for now - will be improved in 02-03)
+		total := 0
+		completed := 0
+		roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
+		if err == nil {
+			for _, p := range roadmap.Phases {
+				total += len(p.Plans)
+				// Count completed by checking JSON plan files
+				// This is a temporary solution until CountPlans is updated in 02-03
+			}
+		}
 
 		// Check if this is a retry and add retry info to display
 		retryState := planRetries[plan.Path]
@@ -1444,6 +1442,72 @@ Complete all manual tasks that couldn't be automated during phase execution.
 `)
 
 	return os.WriteFile(outPath, []byte(content.String()), 0644)
+}
+
+// convertToExecutionStructs converts JSON types to execution-compatible structs with paths
+func convertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*state.Phase, *state.Plan) {
+	// Build phase directory path
+	phaseDir := filepath.Join(planningDir, "phases",
+		fmt.Sprintf("%02d-%s", phaseData.Number, slugify(phaseData.Name)))
+
+	// Build PLAN.md path (format: {phase}-{plan}-PLAN.md)
+	planPath := filepath.Join(phaseDir,
+		fmt.Sprintf("%02d-%s-PLAN.md", phaseData.Number, planData.PlanNumber))
+
+	// Extract plan name from objective or use default
+	planName := extractPlanName(planData.Objective)
+
+	phase := &state.Phase{
+		Number: phaseData.Number,
+		Name:   phaseData.Name,
+		Path:   phaseDir,
+		// Plans field can be populated if needed
+	}
+
+	// Determine plan type from tasks (check if any are manual)
+	planType := state.PlanTypeExecute // Default to execute
+	for _, task := range planData.Tasks {
+		if task.Type == types.TaskTypeManual {
+			planType = state.PlanTypeManual
+			break
+		}
+	}
+
+	plan := &state.Plan{
+		Number: planData.PlanNumber,
+		Name:   planName,
+		Path:   planPath,
+		Type:   planType,
+	}
+
+	return phase, plan
+}
+
+// slugify converts a name to a directory-safe slug
+func slugify(name string) string {
+	slug := strings.ToLower(name)
+	slug = strings.ReplaceAll(slug, " ", "-")
+	result := ""
+	for _, c := range slug {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			result += string(c)
+		}
+	}
+	return result
+}
+
+// extractPlanName extracts a short name from the plan objective
+func extractPlanName(objective string) string {
+	// Take first sentence or first 80 chars
+	lines := strings.Split(objective, ".")
+	if len(lines) > 0 {
+		name := strings.TrimSpace(lines[0])
+		if len(name) > 80 {
+			name = name[:77] + "..."
+		}
+		return name
+	}
+	return objective
 }
 
 // CommitAndPushRepos commits and pushes changes in all workspace repos
