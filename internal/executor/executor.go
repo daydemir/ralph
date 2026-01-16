@@ -287,8 +287,10 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			statusLines = append(statusLines,
 				fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
 
-			// TODO(02-03): Update STATE.md and ROADMAP.md using JSON savers
-			// Will be implemented in plan 02-03 which adds UpdateStateFileJSON/UpdateRoadmapJSON
+			// Update state.json and roadmap.json
+			if err := e.updateStateAndRoadmap(phase, plan); err != nil {
+				e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+			}
 
 			// Commit and push all repos
 			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
@@ -375,8 +377,10 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *stat
 			result.FailureType = FailureNone
 			e.display.RalphBox("MANUAL PLAN", "Manual tasks completed successfully")
 
-			// TODO(02-03): Update STATE.md and ROADMAP.md using JSON savers
-			// Will be implemented in plan 02-03 which adds UpdateStateFileJSON/UpdateRoadmapJSON
+			// Update state.json and roadmap.json
+			if err := e.updateStateAndRoadmap(phase, plan); err != nil {
+				e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+			}
 
 			// Commit and push all repos
 			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
@@ -1508,6 +1512,83 @@ func extractPlanName(objective string) string {
 		return name
 	}
 	return objective
+}
+
+// updateStateAndRoadmap updates state.json and roadmap.json after plan completion
+func (e *Executor) updateStateAndRoadmap(phase *state.Phase, plan *state.Plan) error {
+	// Update state.json
+	projectState, err := state.LoadStateJSON(e.config.PlanningDir)
+	if err != nil {
+		return fmt.Errorf("cannot load state.json: %w", err)
+	}
+
+	// Update current phase and last updated timestamp
+	projectState.CurrentPhase = phase.Number
+	projectState.LastUpdated = time.Now()
+
+	if err := state.SaveStateJSON(e.config.PlanningDir, projectState); err != nil {
+		return fmt.Errorf("cannot save state.json: %w", err)
+	}
+
+	// Update the plan JSON file to mark it complete
+	// Build plan JSON path (format: {phase-dir}/{phase}-{plan}.json)
+	phaseDir := filepath.Join(e.config.PlanningDir, "phases",
+		fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+	planJSONPath := filepath.Join(phaseDir,
+		fmt.Sprintf("%02d-%s.json", phase.Number, plan.Number))
+
+	// Load plan JSON
+	planJSON, err := state.LoadPlanJSON(planJSONPath)
+	if err != nil {
+		return fmt.Errorf("cannot load plan JSON: %w", err)
+	}
+
+	// Mark as complete
+	now := time.Now()
+	planJSON.Status = types.StatusComplete
+	planJSON.CompletedAt = &now
+
+	if err := state.SavePlanJSON(planJSONPath, planJSON); err != nil {
+		return fmt.Errorf("cannot save plan JSON: %w", err)
+	}
+
+	// Check if all plans in this phase are complete
+	// Load all plans for the phase
+	plans, err := state.LoadAllPlansJSON(phaseDir)
+	if err != nil {
+		return fmt.Errorf("cannot load all plans for phase: %w", err)
+	}
+
+	// Check if all are complete
+	allComplete := true
+	for i := range plans {
+		if plans[i].Status != types.StatusComplete {
+			allComplete = false
+			break
+		}
+	}
+
+	// If all plans complete, mark phase as complete in roadmap
+	if allComplete {
+		roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
+		if err != nil {
+			return fmt.Errorf("cannot load roadmap.json: %w", err)
+		}
+
+		// Find and update the phase status
+		for i := range roadmap.Phases {
+			if roadmap.Phases[i].Number == phase.Number {
+				roadmap.Phases[i].Status = types.StatusComplete
+				break
+			}
+		}
+
+		if err := state.SaveRoadmapJSON(e.config.PlanningDir, roadmap); err != nil {
+			return fmt.Errorf("cannot save roadmap.json: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // CommitAndPushRepos commits and pushes changes in all workspace repos
