@@ -226,6 +226,10 @@ func (g *GSD) ReviewPlans(ctx context.Context, phase string) error {
 }
 
 // UpdateRoadmap runs /gsd:update-roadmap (requires ROADMAP.md)
+// TODO(Phase 5 - GSD Integration): Update to generate/update roadmap.json instead of ROADMAP.md
+// Currently generates ROADMAP.md via Claude. Need to either:
+// 1. Update GSD workflow to output roadmap.json directly, OR
+// 2. Add conversion step: read updated ROADMAP.md, convert to roadmap.json
 func (g *GSD) UpdateRoadmap(ctx context.Context) error {
 	if err := g.RequireRoadmap(); err != nil {
 		return err

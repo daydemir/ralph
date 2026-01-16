@@ -30,7 +30,9 @@ This is the recommended way to modify your roadmap. It replaces
 manual use of add-phase, insert-phase, and remove-phase commands
 with an intelligent agent that figures out the right approach.
 
-Your input is captured verbatim for context during planning.`,
+Your input is captured verbatim for context during planning.
+
+Note: Currently updates ROADMAP.md (markdown). Phase 5 will migrate to roadmap.json.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
@@ -38,6 +40,7 @@ Your input is captured verbatim for context during planning.`,
 			return err
 		}
 
+		// TODO(Phase 5): After GSD integration, this should validate/convert ROADMAP.md to roadmap.json
 		gsd := planner.NewGSD("", cwd)
 		return gsd.UpdateRoadmap(context.Background())
 	},
