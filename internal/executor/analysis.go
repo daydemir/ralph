@@ -8,10 +8,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/llm"
 	"github.com/daydemir/ralph/internal/state"
+	"github.com/daydemir/ralph/internal/types"
 )
 
 // Observation represents a finding captured during plan execution
@@ -66,9 +68,9 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 
 	observations := ParseObservations(string(planContent), e.display)
 
-	// Also check SUMMARY.md for prose-format observations
+	// Also check summary.json for prose-format observations
 	// The execution agent often writes observations there under "Auto-fixed Issues"
-	summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+	summaryPath := strings.Replace(plan.Path, ".json", "-summary.json", 1)
 	if summaryContent, err := os.ReadFile(summaryPath); err == nil {
 		summaryObs := ParseSummaryObservations(string(summaryContent))
 		observations = append(observations, summaryObs...)
@@ -99,7 +101,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 		Prompt: prompt,
 		ContextFiles: []string{
 			plan.Path,
-			filepath.Join(e.config.PlanningDir, "ROADMAP.md"),
+			filepath.Join(e.config.PlanningDir, "roadmap.json"),
 		},
 		Model: e.config.Model,
 		AllowedTools: []string{
@@ -176,7 +178,7 @@ func ParseObservations(content string, disp *display.Display) []Observation {
 	return observations
 }
 
-// ParseSummaryObservations extracts observations from SUMMARY.md prose format
+// ParseSummaryObservations extracts observations from summary.json prose format
 // Looks for patterns in "Auto-fixed Issues" and "Issues Encountered" sections
 // Format: **N. [Rule X - TYPE] TITLE** followed by bullet points with details
 func ParseSummaryObservations(content string) []Observation {
@@ -353,7 +355,7 @@ You have FULL AUTHORITY to restructure the plan sequence based on observations. 
 #### 1. REORDER PLANS
 If observations show Plan X depends on Plan Y (but Y comes after X), reorder the sequence:
 - Renumber plan files to reflect the new order (e.g., if Plan 05 must come before Plan 03, rename files accordingly)
-- Update ROADMAP.md to show the new sequence
+- Update roadmap.json to show the new sequence
 - Document the reason for reordering
 
 Example:
@@ -363,9 +365,9 @@ Example:
 
 #### 2. CREATE NEW PLANS
 If observations reveal work not covered by any existing plan:
-- Create new XX-PLAN.md files using the standard plan template
+- Create new XX-plan.json files using the standard plan template
 - Insert at the appropriate position in the sequence
-- Update ROADMAP.md to include the new plan
+- Update roadmap.json to include the new plan
 - Set status to PENDING
 
 New plan template structure:
@@ -402,12 +404,12 @@ Created by analysis agent based on observation:
 
 #### 3. SKIP/REMOVE PLANS
 If observations show planned work is already complete:
-- Mark the plan as SKIPPED in ROADMAP.md with reason
+- Mark the plan as SKIPPED in roadmap.json with reason
 - Document evidence of completion (files that exist, tests that pass, etc.)
 - Remove from active execution queue (but keep original file for reference)
 
-#### 4. UPDATE ROADMAP.md
-ALL restructuring changes MUST be reflected in ROADMAP.md:
+#### 4. UPDATE roadmap.json
+ALL restructuring changes MUST be reflected in roadmap.json:
 - Reordering: Update phase/plan sequence
 - New plans: Add entry at appropriate position
 - Skipped plans: Mark with SKIPPED status and reason
@@ -476,7 +478,7 @@ For each plan that needs updating:
 ## Safety Considerations
 - All restructuring is logged in execution history
 - Original plans are preserved (renamed, not deleted)
-- ROADMAP.md serves as audit trail
+- roadmap.json serves as audit trail
 - Document the observation that triggered each change
 
 ## Rules
@@ -546,7 +548,7 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 	var verifications []CheckpointVerification
 
 	for _, plan := range phase.Plans {
-		// Only check completed plans (have SUMMARY.md)
+		// Only check completed plans (have summary.json)
 		if !plan.IsCompleted {
 			continue
 		}
@@ -607,7 +609,7 @@ func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
 // MaybeCreateVerificationPlan checks if phase is complete and creates bundled verification plan
 func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error) {
 	// Check if verification plan already exists
-	verificationPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99-verification-PLAN.md", phase.Number))
+	verificationPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99.json", phase.Number))
 	if _, err := os.Stat(verificationPath); err == nil {
 		// Verification plan already exists
 		return false, nil
@@ -639,90 +641,53 @@ func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error)
 	return true, nil
 }
 
-// createVerificationPlan generates the bundled verification plan file
+// createVerificationPlan generates the bundled verification plan file in JSON format
 func (e *Executor) createVerificationPlan(phase *state.Phase, verifications []CheckpointVerification, outPath string) error {
-	var content strings.Builder
-
-	// Write frontmatter
-	content.WriteString(fmt.Sprintf(`---
-phase: %d
-plan: 99
-type: verification
-status: pending
----
-
-# Phase %d Verification: Human Checkpoint Review
-
-## Objective
-
-Review all automated verifications from this phase and provide feedback.
-This is the final quality gate before the phase is considered complete.
-
-## Checkpoints to Review
-
-`, phase.Number, phase.Number))
-
-	// Write each checkpoint
+	// Build tasks from checkpoint verifications
+	var tasks []types.Task
 	for i, v := range verifications {
-		content.WriteString(fmt.Sprintf(`### %d. %s
-
-**From plan:** %s (Plan %02d-%s)
-`, i+1, v.CheckpointName, v.PlanName, phase.Number, v.PlanNumber))
-
+		// Build action description with checkpoint details
+		actionDetails := fmt.Sprintf("Checkpoint: %s\nFrom plan: %s\n", v.CheckpointName, v.PlanName)
 		if v.AutomatedTest != "" {
-			content.WriteString(fmt.Sprintf("**Automated test:** `%s`\n", v.AutomatedTest))
+			actionDetails += fmt.Sprintf("Automated test: %s\n", v.AutomatedTest)
 		}
-
 		if len(v.WhatAutomated) > 0 {
-			content.WriteString("**What was automated:**\n")
-			for _, item := range v.WhatAutomated {
-				content.WriteString(fmt.Sprintf("- %s\n", item))
-			}
+			actionDetails += "Automated: " + strings.Join(v.WhatAutomated, ", ") + "\n"
 		}
-
 		if len(v.NeedsHuman) > 0 {
-			content.WriteString("**Still needs human review:**\n")
-			for _, item := range v.NeedsHuman {
-				content.WriteString(fmt.Sprintf("- %s\n", item))
-			}
+			actionDetails += "Needs human review: " + strings.Join(v.NeedsHuman, ", ") + "\n"
 		}
 
-		content.WriteString("\n**How to verify:**\n")
-		content.WriteString("1. Review the automated test results\n")
-		content.WriteString("2. Manually check the aspects that couldn't be automated\n")
-		content.WriteString("3. Provide approval or describe issues\n\n")
+		tasks = append(tasks, types.Task{
+			ID:     fmt.Sprintf("verify-%d", i+1),
+			Name:   fmt.Sprintf("Verify: %s", v.CheckpointName),
+			Type:   types.TaskTypeManual, // Verification requires human action
+			Files:  []string{v.PlanPath},
+			Action: actionDetails,
+			Done:   "Human has reviewed and approved this checkpoint",
+			Status: types.StatusPending,
+		})
 	}
 
-	// Write verification process
-	content.WriteString(`## Verification Process
+	// Build verification items
+	verification := []string{
+		"All automated tests pass",
+		"All manual verification aspects reviewed",
+		"Human approval received for each checkpoint",
+		"Any issues documented and addressed",
+	}
 
-1. Review each checkpoint above
-2. For each checkpoint, respond:
-   - ✅ **Approved** - Verification passes
-   - ❌ **Issue: [description]** - Describe what's wrong
+	plan := &types.Plan{
+		Phase:        fmt.Sprintf("%02d-%s", phase.Number, phase.Name),
+		PlanNumber:   "99",
+		Status:       types.StatusPending,
+		Objective:    fmt.Sprintf("Review all automated verifications from Phase %d and provide feedback", phase.Number),
+		Tasks:        tasks,
+		Verification: verification,
+		CreatedAt:    time.Now(),
+	}
 
-3. Issues will trigger fix plan creation
-
-<task type="checkpoint:human-action">
-Review all checkpoints above and provide feedback for each.
-<verify>User has reviewed and provided feedback for all checkpoints</verify>
-</task>
-
-## Post-Verification
-
-After all checkpoints are reviewed:
-- **If all approved**: Phase is complete, proceed to next phase
-- **If issues found**: Create fix plans for each issue, then re-verify
-
-## Success Criteria
-
-- All automated tests pass
-- All manual verification aspects reviewed
-- Human approval received for each checkpoint
-- Any issues documented and addressed
-`)
-
-	return os.WriteFile(outPath, []byte(content.String()), 0644)
+	return state.SavePlanJSON(outPath, plan)
 }
 
 // BlockerAnalysisResult holds the result of blocker verification
@@ -817,7 +782,7 @@ func (e *Executor) RunBlockerAnalysis(ctx context.Context, failure *llm.FailureS
 		Prompt: prompt,
 		ContextFiles: []string{
 			plan.Path,
-			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+			filepath.Join(e.config.PlanningDir, "project.json"),
 		},
 		Model: "opus", // Use Opus for better reasoning on blocker verification
 		AllowedTools: []string{
@@ -902,7 +867,7 @@ func (e *Executor) DecideRecovery(ctx context.Context, execCtx ExecutionContext,
 		Prompt: prompt,
 		ContextFiles: []string{
 			plan.Path,
-			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+			filepath.Join(e.config.PlanningDir, "project.json"),
 		},
 		Model: e.config.Model,
 		AllowedTools: []string{

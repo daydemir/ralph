@@ -12,35 +12,14 @@ import (
 
 	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/llm"
+	"github.com/daydemir/ralph/internal/prompts"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/daydemir/ralph/internal/types"
 )
 
-// gsdWorkflowPath returns the path to the GSD execute-phase workflow
-func gsdWorkflowPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".claude", "get-shit-done", "workflows", "execute-phase.md")
-}
-
-// loadGSDWorkflow attempts to load the GSD execute-phase workflow from the user's home directory
-func loadGSDWorkflow() (string, error) {
-	gsdPath := gsdWorkflowPath()
-	if gsdPath == "" {
-		return "", fmt.Errorf("HOME not set")
-	}
-
-	content, err := os.ReadFile(gsdPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("GSD workflow not found at %s", gsdPath)
-		}
-		return "", err
-	}
-
-	return string(content), nil
+// loadExecutorPrompt loads the executor agent prompt from internal templates
+func loadExecutorPrompt() (string, error) {
+	return prompts.GetAgent("executor")
 }
 
 // FailureType indicates the severity of a failure
@@ -149,8 +128,8 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 		Prompt: prompt,
 		ContextFiles: []string{
 			plan.Path,
-			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
-			filepath.Join(e.config.PlanningDir, "STATE.md"),
+			filepath.Join(e.config.PlanningDir, "project.json"),
+			filepath.Join(e.config.PlanningDir, "state.json"),
 		},
 		Model: e.config.Model,
 		AllowedTools: []string{
@@ -273,15 +252,15 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 				fmt.Sprintf("%s %s: %s", e.display.Theme().Error(display.SymbolError), failure.Type, failure.Detail))
 		}
 	} else if handler.IsPlanComplete() {
-		// Verify SUMMARY.md was created before marking success
-		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+		// Verify summary.json was created before marking success
+		summaryPath := strings.Replace(plan.Path, ".json", "-summary.json", 1)
 		if _, err := os.Stat(summaryPath); os.IsNotExist(err) {
-			result.Error = fmt.Errorf("plan signaled complete but SUMMARY.md not created: %s", summaryPath)
+			result.Error = fmt.Errorf("plan signaled complete but summary.json not created: %s", summaryPath)
 			result.FailureType = FailureSoft
 			statusLines = append(statusLines,
-				fmt.Sprintf("%s Plan signaled complete but SUMMARY.md missing", e.display.Theme().Warning(display.SymbolWarning)))
+				fmt.Sprintf("%s Plan signaled complete but summary.json missing", e.display.Theme().Warning(display.SymbolWarning)))
 		} else {
-			// Success - explicit completion signal with SUMMARY.md verified
+			// Success - explicit completion signal with summary.json verified
 			result.Success = true
 			result.FailureType = FailureNone
 			statusLines = append(statusLines,
@@ -350,14 +329,24 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *stat
 		fmt.Sprintf("Opening interactive session: %s", plan.Name),
 		"Complete manual tasks, then /exit when done")
 
-	// Build prompt that invokes gsd:execute-plan skill
-	prompt := fmt.Sprintf("/gsd:execute-plan %s", plan.Path)
+	// Build prompt using internal executor prompt
+	executorPrompt, _ := loadExecutorPrompt()
+	prompt := fmt.Sprintf(`%s
+
+## Current Plan (Manual Tasks)
+
+Plan Location: %s
+
+This plan contains manual tasks that require human interaction.
+Guide the user through each task, verify completion, and create summary.json when done.
+
+Begin by reading the plan and presenting the first task.`, executorPrompt, plan.Path)
 
 	opts := llm.ExecuteOptions{
 		Prompt: prompt,
 		ContextFiles: []string{
 			plan.Path,
-			filepath.Join(e.config.PlanningDir, "PROJECT.md"),
+			filepath.Join(e.config.PlanningDir, "project.json"),
 		},
 		Model:   e.config.Model,
 		WorkDir: e.config.WorkDir,
@@ -370,8 +359,8 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *stat
 		result.FailureType = FailureSoft
 		e.display.Error(fmt.Sprintf("Interactive session failed: %v", err))
 	} else {
-		// Check if SUMMARY.md was created
-		summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+		// Check if summary.json was created
+		summaryPath := strings.Replace(plan.Path, ".json", "-summary.json", 1)
 		if _, err := os.Stat(summaryPath); err == nil {
 			result.Success = true
 			result.FailureType = FailureNone
@@ -387,7 +376,7 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *stat
 			e.CommitAndPushRepos(planId)
 		} else {
 			result.FailureType = FailureSoft
-			e.display.Warning("Session ended but SUMMARY.md not created - manual tasks may be incomplete")
+			e.display.Warning("Session ended but summary.json not created - manual tasks may be incomplete")
 		}
 	}
 
@@ -544,18 +533,25 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 }
 
 func (e *Executor) buildExecutionPrompt(planPath string) string {
-	// Try to load GSD workflow as base
-	gsdBase, err := loadGSDWorkflow()
+	// Load internal executor prompt
+	executorPrompt, err := loadExecutorPrompt()
 	if err != nil {
-		// Log warning and use fallback
-		e.display.Warning(fmt.Sprintf("GSD workflow not available: %v (using fallback)", err))
+		// Fall back to inline prompt
+		e.display.Warning(fmt.Sprintf("Executor prompt not available: %v (using fallback)", err))
 		return e.buildFallbackExecutionPrompt(planPath)
 	}
 
-	// Build Ralph-specific augmentations
-	ralphAugmentations := buildRalphAugmentations(planPath)
+	// Add plan path context
+	planContext := fmt.Sprintf(`
+## Current Plan
 
-	return gsdBase + "\n\n" + ralphAugmentations
+Plan Location: %s
+
+Execute this plan following the executor protocol above.
+
+Begin execution now.`, planPath)
+
+	return executorPrompt + "\n\n" + planContext
 }
 
 // buildRalphAugmentations returns Ralph-specific additions to append to GSD workflow
@@ -566,31 +562,52 @@ func buildRalphAugmentations(planPath string) string {
 
 The following are Ralph-specific extensions to the GSD execution workflow.
 
-### Plan Location
-%s
+<context>
+Plan Location: %s
 
-### Observation Types (Ralph-specific)
+Ralph's analysis agent parses observations to improve subsequent plans after execution completes.
+</context>
 
-Ralph's analysis agent parses observations to improve subsequent plans. Types:
-- **bug**: Bug found that needs fixing
-- **stub**: Stub/placeholder code that needs implementation
-- **api-issue**: External API problem or inconsistency
-- **insight**: Useful information for future plans
-- **blocker**: Something blocking progress
-- **technical-debt**: Code that works but needs improvement
-- **assumption**: Decision made without full information
-- **scope-creep**: Work discovered that wasn't in the plan
-- **dependency**: Unexpected dependency between tasks/plans
-- **questionable**: Suspicious code or pattern worth reviewing
-- **already-complete**: Work was already done before execution
-- **checkpoint-automated**: Checkpoint verification that was automated
-- **tooling-friction**: Tool/environment issue that slowed progress
-- **test-failed**: Test(s) failed during execution - enumerate test names
-- **test-infrastructure**: Test environment issue (simulator, timeout, xcodebuild syntax)
+<task>
+Execute the plan at the location above, following GSD execution workflow with Ralph extensions.
 
-### Observation Format (CRITICAL - Analyzer Cannot Parse Prose)
+After completing (or failing), Ralph spawns an analysis agent to:
+1. Parse all observations from this execution
+2. Review subsequent plans for impact
+3. Potentially restructure plans (reorder, create new, skip completed)
 
-**IMPORTANT**: Prose observations like "## Discovery: ..." or "**Finding:** ..." CANNOT be parsed.
+To maximize effectiveness:
+- Record observations AS YOU FIND THEM
+- Be specific about dependencies discovered
+- Flag assumptions that might affect future plans
+</task>
+
+<constraints>
+OBSERVATION TYPES (Ralph-specific):
+- bug: Bug found that needs fixing
+- stub: Stub/placeholder code that needs implementation
+- api-issue: External API problem or inconsistency
+- insight: Useful information for future plans
+- blocker: Something blocking progress
+- technical-debt: Code that works but needs improvement
+- assumption: Decision made without full information
+- scope-creep: Work discovered that wasn't in the plan
+- dependency: Unexpected dependency between tasks/plans
+- questionable: Suspicious code or pattern worth reviewing
+- already-complete: Work was already done before execution
+- checkpoint-automated: Checkpoint verification that was automated
+- tooling-friction: Tool/environment issue that slowed progress
+- test-failed: Test(s) failed during execution - enumerate test names
+- test-infrastructure: Test environment issue (simulator, timeout, xcodebuild syntax)
+
+SEVERITIES: critical, high, medium, low, info
+ACTIONS: needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+</constraints>
+
+<output-format>
+OBSERVATION FORMAT (CRITICAL - Analyzer Cannot Parse Prose):
+
+Prose observations like "## Discovery: ..." or "**Finding:** ..." CANNOT be parsed.
 You MUST use this exact XML format:
 
 `+"```"+`xml
@@ -602,36 +619,44 @@ You MUST use this exact XML format:
 </observation>
 `+"```"+`
 
-**Severities**: critical, high, medium, low, info
-**Actions**: needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+RALPH SIGNALS:
+- ###PLAN_COMPLETE### - All tasks done, verified, builds and tests pass
+- ###TASK_FAILED:{name}### - A task couldn't be completed
+- ###PLAN_FAILED:{check}### - Plan verification failed
+- ###BUILD_FAILED:{project}### - Build failed (e.g., ios, backend)
+- ###TEST_FAILED:{project}:{count}### - Tests failed that weren't failing before
+- ###BLOCKED:{reason}### - Need human intervention
+- ###BAILOUT:{reason}### - Preserving context, update Progress first
+</output-format>
 
-### What to Observe (LOW BAR - Record Everything)
+<rules>
+WHAT TO OBSERVE (LOW BAR - Record Everything):
 
 Record routine findings. Examples:
-- "3 tests in X are stubs" → type="stub", action="needs-implementation"
-- "File Y has no tests" → type="insight", action="needs-plan"
-- "Function Z is deprecated but used in 5 places" → type="technical-debt", action="needs-fix"
-- "This took 30 min because docs were wrong" → type="tooling-friction", action="needs-documentation"
-- "Tests already exist for X" → type="already-complete", action="none"
-- "Found TODO comment in code" → type="stub", action="needs-implementation"
-- "API returns different format than docs say" → type="api-issue", action="needs-investigation"
+- "3 tests in X are stubs" -> type="stub", action="needs-implementation"
+- "File Y has no tests" -> type="insight", action="needs-plan"
+- "Function Z is deprecated but used in 5 places" -> type="technical-debt", action="needs-fix"
+- "This took 30 min because docs were wrong" -> type="tooling-friction", action="needs-documentation"
+- "Tests already exist for X" -> type="already-complete", action="none"
+- "Found TODO comment in code" -> type="stub", action="needs-implementation"
+- "API returns different format than docs say" -> type="api-issue", action="needs-investigation"
 
-**The analysis agent needs DATA to work with. Under-reporting = no analysis happens.**
+The analysis agent needs DATA to work with. Under-reporting = no analysis happens.
 
-### Documenting Test Failures (CRITICAL)
+DOCUMENTING TEST FAILURES (CRITICAL):
 
 Test failures require STRUCTURED observations, not prose notes. The analysis agent:
 - Can detect patterns across plans (e.g., "xcodebuild issues in 4/5 plans")
 - Can recommend infrastructure fixes when issues repeat
 - CANNOT parse prose like "tests failed, see output"
 
-**When tests fail:**
+When tests fail:
 1. Use type="test-failed" (NOT generic "blocker")
 2. List EACH failed test by name
 3. Include error messages or expected vs actual
 4. For tooling issues (xcodebuild syntax), use type="test-infrastructure"
 
-**Example - Test Failures:**
+Example - Test Failures:
 `+"```"+`xml
 <observation type="test-failed" severity="high">
   <title>3 SpatialAudioService tests failing</title>
@@ -647,7 +672,7 @@ Test failures require STRUCTURED observations, not prose notes. The analysis age
 </observation>
 `+"```"+`
 
-**Example - Test Infrastructure:**
+Example - Test Infrastructure:
 `+"```"+`xml
 <observation type="test-infrastructure" severity="medium">
   <title>xcodebuild -only-testing syntax unclear</title>
@@ -662,7 +687,7 @@ Test failures require STRUCTURED observations, not prose notes. The analysis age
 </observation>
 `+"```"+`
 
-### Recording Observations (Use Subagents to Save Context)
+RECORDING OBSERVATIONS (Use Subagents to Save Context):
 
 Recording observations inline burns your main context. Use Task tool to delegate:
 
@@ -680,23 +705,11 @@ Task(subagent_type="general-purpose", prompt="
 
 Record observations AS YOU GO - don't batch them at the end.
 
-### Post-Execution Analysis
-
-After you complete (or fail), Ralph spawns an analysis agent to:
-1. Parse all observations from this execution
-2. Review subsequent plans for impact
-3. Potentially restructure plans (reorder, create new, skip completed)
-
-To maximize effectiveness:
-- Record observations AS YOU FIND THEM
-- Be specific about dependencies discovered
-- Flag assumptions that might affect future plans
-
-### Pre-Existing Work Handling (IMPORTANT)
+PRE-EXISTING WORK HANDLING:
 
 When you find that work in a task is ALREADY COMPLETE (files exist, code already implemented):
 
-1. **Record an observation:**
+1. Record an observation:
    `+"```"+`xml
    <observation type="already-complete" severity="info">
      <title>Task N already implemented</title>
@@ -706,44 +719,44 @@ When you find that work in a task is ALREADY COMPLETE (files exist, code already
    </observation>
    `+"```"+`
 
-2. **Update Progress section:** Mark task as `+"`[ALREADY_COMPLETE]`"+`
+2. Update Progress section: Mark task as `+"`[ALREADY_COMPLETE]`"+`
 
-3. **Verify existing work meets requirements** - if partial, complete it
+3. Verify existing work meets requirements - if partial, complete it
 
-4. **Continue normally:** Create SUMMARY.md, signal ###PLAN_COMPLETE###
+4. Continue normally: Create summary.json, signal ###PLAN_COMPLETE###
 
-**DO NOT** get stuck investigating history. Document what exists and move forward.
+DO NOT get stuck investigating history. Document what exists and move forward.
 
-### Background Task Verification (MANDATORY)
+BACKGROUND TASK VERIFICATION (MANDATORY):
 
 BEFORE signaling ###PLAN_COMPLETE###, you MUST verify all background tasks have finished:
 
-1. **Check for running background tasks:**
+1. Check for running background tasks:
    - If you started tests/builds with `+"`run_in_background: true`"+`, you MUST wait for completion
    - Read the output file (from TaskOutput) to verify tests completed AND passed
    - Use Bash: `+"`ps aux | grep -E \"(xcodebuild|npm test|pytest|go test)\" | grep -v grep`"+` to check for running processes
 
-2. **You CANNOT signal ###PLAN_COMPLETE### if:**
+2. You CANNOT signal ###PLAN_COMPLETE### if:
    - Background tests are still running (check process list)
    - You haven't read and verified test output shows passing
    - Build processes are still executing
-   - SUMMARY.md has not been created
+   - summary.json has not been created
 
-3. **Verification sequence:**
+3. Verification sequence:
    a. Wait for all background tasks to finish (use TaskOutput with block=true)
    b. Verify test results show PASS (not just "started" or "running")
-   c. Create SUMMARY.md with execution details
+   c. Create summary.json with execution details
    d. Only then signal ###PLAN_COMPLETE###
 
-Ralph will verify SUMMARY.md exists before accepting the completion signal.
+Ralph will verify summary.json exists before accepting the completion signal.
 
-### Manual Task Handling (AUTONOMOUS MODE - CRITICAL)
+MANUAL TASK HANDLING (AUTONOMOUS MODE - CRITICAL):
 
 When encountering a task with type="manual" or type="checkpoint:human-action":
 
-**DO NOT wait for user input.** You are running in autonomous mode without interactive input.
+DO NOT wait for user input. You are running in autonomous mode without interactive input.
 
-1. **Record the task as an observation:**
+1. Record the task as an observation:
 `+"```"+`xml
 <observation type="manual-checkpoint-deferred" severity="info">
   <title>Manual task deferred: [task name]</title>
@@ -753,50 +766,40 @@ When encountering a task with type="manual" or type="checkpoint:human-action":
 </observation>
 `+"```"+`
 
-2. **Skip the task and continue to next task**
+2. Skip the task and continue to next task
 
-3. **At plan end:** Note deferred manual tasks in SUMMARY.md
+3. At plan end: Note deferred manual tasks in summary.json
 
-**Why:** Manual tasks are bundled into a separate XX-99-manual-PLAN.md that runs at phase end.
+Why: Manual tasks are bundled into a separate XX-99-manual-PLAN.md that runs at phase end.
 This keeps automation flowing while collecting human work.
 
-**Example handling:**
+Example handling:
 - See task: `+"`<task type=\"manual\">Add file to Xcode...</task>`"+`
 - Record observation with type="manual-checkpoint-deferred"
 - Skip the task
 - Continue with next auto task
-- In SUMMARY.md: "Deferred 1 manual task to phase-end plan"
+- In summary.json: "Deferred 1 manual task to phase-end plan"
 
-### Ralph Signals
-
-Ralph monitors for these signals in addition to GSD signals:
-- ###PLAN_COMPLETE### - All tasks done, verified, builds and tests pass
-- ###TASK_FAILED:{name}### - A task couldn't be completed
-- ###PLAN_FAILED:{check}### - Plan verification failed
-- ###BUILD_FAILED:{project}### - Build failed (e.g., ios, backend)
-- ###TEST_FAILED:{project}:{count}### - Tests failed that weren't failing before
-- ###BLOCKED:{reason}### - Need human intervention
-- ###BAILOUT:{reason}### - Preserving context, update Progress first
-
-### Context Management (Ralph Safety Net)
+CONTEXT MANAGEMENT (Ralph Safety Net):
 
 Ralph monitors your token usage and will terminate at 120K tokens as a safety net.
 
-**Self-monitoring heuristics:**
+Self-monitoring heuristics:
 - Count your tool calls: if > 50 tool calls without task completion, you're burning context
 - Watch for repeated errors: 3+ retries of same fix = stuck, bail out
 - File reading volume: if you've read > 20 files without progress, context is bloated
 
-**Use subagents for writing to save context:**
+Use subagents for writing to save context:
 - Use Task tool (subagent_type="general-purpose") for recording observations and progress updates
 - Prompt: "Update PLAN.md with observations: [list what you found]. Update Progress section: [current state]"
 - This offloads file editing work to a fresh subagent context, preserving your main context for execution
 
-**At ~100K tokens, proactively bail out:**
+At ~100K tokens, proactively bail out:
 1. Update the PLAN.md Progress section with current state
 2. Update the ## Observations section with any findings
 3. Document what worked, what failed, and next steps
 4. Signal: ###BAILOUT:context_preservation###
+</rules>
 
 Begin execution now.`, planPath)
 }
@@ -822,7 +825,7 @@ func (e *Executor) buildFallbackExecutionPrompt(planPath string) string {
 6. After ALL tasks complete:
    - Run all checks in <verification> section
    - Run build and test verification (see below)
-   - Create SUMMARY.md in the phase directory
+   - Create summary.json in the phase directory
    - Signal: ###PLAN_COMPLETE###
 
 ## Progress Tracking (MANDATORY)
@@ -898,7 +901,7 @@ When you find work is ALREADY COMPLETE:
 
 3. **Verify existing work meets requirements** - if partial, complete it
 
-4. **Continue normally:** Create SUMMARY.md, signal ###PLAN_COMPLETE###
+4. **Continue normally:** Create summary.json, signal ###PLAN_COMPLETE###
 
 **DO NOT** get stuck investigating history. Document what exists and move forward.
 
@@ -942,14 +945,14 @@ If you started ANY tasks with `+"`"+`run_in_background: true`+"`"+`, you MUST ve
    - Look for "PASS" or "succeeded" (not just "started" or "running")
    - Count actual test results, not just the command starting
 
-4. **Create SUMMARY.md BEFORE signaling:**
-   - Ralph will verify SUMMARY.md exists before accepting the completion signal
-   - If SUMMARY.md is missing, your ###PLAN_COMPLETE### will be rejected
+4. **Create summary.json BEFORE signaling:**
+   - Ralph will verify summary.json exists before accepting the completion signal
+   - If summary.json is missing, your ###PLAN_COMPLETE### will be rejected
 
 **Verification sequence:**
 a. Wait for all background tasks (TaskOutput with block=true)
 b. Verify test output shows actual PASS results
-c. Create SUMMARY.md with execution details
+c. Create summary.json with execution details
 d. Only then signal ###PLAN_COMPLETE###
 
 ## Context Management (CRITICAL)
@@ -1040,23 +1043,23 @@ type SoftFailureAnalysisResult struct {
 
 // runSoftFailureAnalysis evaluates what happened during a soft failure and decides how to proceed
 func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, result *RunResult) *SoftFailureAnalysisResult {
-	// Check if SUMMARY.md exists → likely complete
-	summaryPath := strings.Replace(plan.Path, "-PLAN.md", "-SUMMARY.md", 1)
+	// Check if summary.json exists → likely complete
+	summaryPath := strings.Replace(plan.Path, ".json", "-summary.json", 1)
 	if _, err := os.Stat(summaryPath); err == nil {
 		return &SoftFailureAnalysisResult{
 			Decision: MarkComplete,
-			Reason:   "SUMMARY.md exists, plan appears complete",
+			Reason:   "summary.json exists, plan appears complete",
 		}
 	}
 
 	// Check Progress section
 	progress := extractProgressSection(plan.Path)
 	if strings.Contains(progress, "[COMPLETE]") && !strings.Contains(progress, "[PENDING]") {
-		// All tasks marked complete but no SUMMARY
+		// All tasks marked complete but no summary
 		return &SoftFailureAnalysisResult{
 			Decision: RetryWithGuidance,
-			Reason:   "Tasks complete but SUMMARY.md missing",
-			Guidance: "All tasks appear complete. Create SUMMARY.md and signal ###PLAN_COMPLETE###",
+			Reason:   "Tasks complete but summary.json missing",
+			Guidance: "All tasks appear complete. Create summary.json and signal ###PLAN_COMPLETE###",
 		}
 	}
 
@@ -1122,35 +1125,6 @@ Analyze what went wrong and proceed carefully.
 `, state.Attempts+1, state.Attempts, state.LastProgress, state.LastOutput)
 }
 
-// CheckGSDInstalled verifies GSD is installed
-func CheckGSDInstalled() error {
-	// Check if GSD commands are available by checking for the skill files
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("cannot find home directory: %w", err)
-	}
-
-	// Check global install
-	globalPath := filepath.Join(home, ".claude", "commands", "gsd")
-	if _, err := os.Stat(globalPath); err == nil {
-		return nil
-	}
-
-	// Check local install
-	cwd, _ := os.Getwd()
-	localPath := filepath.Join(cwd, ".claude", "commands", "gsd")
-	if _, err := os.Stat(localPath); err == nil {
-		return nil
-	}
-
-	return fmt.Errorf(`GSD (Get Shit Done) not installed
-
-Install with:
-  npx get-shit-done-cc --global
-
-Or for local install:
-  npx get-shit-done-cc --local`)
-}
 
 // CheckClaudeInstalled verifies Claude Code CLI is available
 func CheckClaudeInstalled() error {
@@ -1212,7 +1186,7 @@ type DecisionCheckpoint struct {
 // MaybeCreateDecisionsPlan scans a phase for checkpoint:decision tasks and creates a bundled decisions plan
 func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
 	// Check if decisions plan already exists
-	decisionsPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-00-decisions-PLAN.md", phase.Number))
+	decisionsPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-00.json", phase.Number))
 	if _, err := os.Stat(decisionsPath); err == nil {
 		// Decisions plan already exists
 		return false, nil
@@ -1259,72 +1233,40 @@ func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
 	return true, nil
 }
 
-// createDecisionsPlan generates the bundled decisions plan file
+// createDecisionsPlan generates the bundled decisions plan file in JSON format
 func (e *Executor) createDecisionsPlan(phase *state.Phase, decisions []DecisionCheckpoint, outPath string) error {
-	var content strings.Builder
-
-	// Write frontmatter
-	content.WriteString(fmt.Sprintf(`---
-phase: %d
-plan: 0
-type: decisions
-status: pending
----
-
-# Phase %d Decisions: Upfront Choices
-
-## Objective
-
-Make all architectural and approach decisions before executing phase plans.
-These decisions will be referenced by subsequent plans via STATE.md.
-
-## Decisions Required
-
-`, phase.Number, phase.Number))
-
-	// Write each decision
+	// Build tasks from decision checkpoints
+	var tasks []types.Task
 	for i, d := range decisions {
-		affectedPlans := fmt.Sprintf("%02d-%s", phase.Number, d.PlanNumber)
-		content.WriteString(fmt.Sprintf(`### Decision %d: From Plan %s
-
-**Original plan:** %s
-**Affects:** Plan %s and potentially subsequent plans
-
-%s
-
-<task type="checkpoint:decision">
-%s
-</task>
-
-`, i+1, d.PlanName, d.PlanPath, affectedPlans, d.Context, d.TaskContent))
+		tasks = append(tasks, types.Task{
+			ID:     fmt.Sprintf("decision-%d", i+1),
+			Name:   fmt.Sprintf("Decision from Plan %s", d.PlanName),
+			Type:   types.TaskTypeManual, // Decisions require human input
+			Files:  []string{d.PlanPath},
+			Action: d.TaskContent,
+			Done:   "Decision made and recorded",
+			Status: types.StatusPending,
+		})
 	}
 
-	// Write recording instructions
-	content.WriteString(`## Recording Decisions
+	// Build verification items
+	verification := []string{
+		"All decisions have been made",
+		"Each decision is recorded in state.json",
+		"Decision rationales are documented",
+	}
 
-After each decision is made:
-1. Record the decision in STATE.md Decisions table
-2. Include the rationale
-3. Note which plans are affected
+	plan := &types.Plan{
+		Phase:        fmt.Sprintf("%02d-%s", phase.Number, phase.Name),
+		PlanNumber:   "00",
+		Status:       types.StatusPending,
+		Objective:    fmt.Sprintf("Make all architectural and approach decisions before executing Phase %d plans", phase.Number),
+		Tasks:        tasks,
+		Verification: verification,
+		CreatedAt:    time.Now(),
+	}
 
-Subsequent plans will read STATE.md to access these decisions.
-
-## Verification
-
-<verification>
-- [ ] All decisions have been made
-- [ ] Each decision is recorded in STATE.md
-- [ ] Decision rationales are documented
-</verification>
-
-## Success Criteria
-
-- All architectural and approach decisions are finalized
-- STATE.md Decisions table is populated with all choices
-- Team is aligned on the approach before execution begins
-`)
-
-	return os.WriteFile(outPath, []byte(content.String()), 0644)
+	return state.SavePlanJSON(outPath, plan)
 }
 
 // ManualTask represents a manual task extracted from a plan
@@ -1339,7 +1281,7 @@ type ManualTask struct {
 // MaybeCreateManualTasksPlan scans a phase for manual and checkpoint:human-action tasks and creates a bundled manual tasks plan
 func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) {
 	// Check if manual tasks plan already exists
-	manualPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99-manual-PLAN.md", phase.Number))
+	manualPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99.json", phase.Number))
 	if _, err := os.Stat(manualPath); err == nil {
 		// Manual tasks plan already exists
 		return false, nil
@@ -1403,49 +1345,39 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 	return true, nil
 }
 
-// createManualTasksPlan generates the bundled manual tasks plan file
-func (e *Executor) createManualTasksPlan(phase *state.Phase, tasks []ManualTask, outPath string) error {
-	var content strings.Builder
-
-	// Write frontmatter
-	content.WriteString(fmt.Sprintf(`---
-phase: %d
-plan: 99
-type: manual
-status: pending
----
-
-# Phase %d Manual Tasks: Human Verification
-
-## Objective
-
-Complete all manual tasks that couldn't be automated during phase execution.
-
-## Manual Tasks
-
-`, phase.Number, phase.Number))
-
-	// Write each manual task
-	for i, task := range tasks {
-		content.WriteString(fmt.Sprintf(`### Task %d: %s (from Plan %s)
-
-**Original plan:** %s
-
-<task type="manual">
-%s
-</task>
-
-`, i+1, task.TaskName, task.PlanName, task.PlanPath, task.TaskContent))
+// createManualTasksPlan generates the bundled manual tasks plan file in JSON format
+func (e *Executor) createManualTasksPlan(phase *state.Phase, manualTasks []ManualTask, outPath string) error {
+	// Build tasks from manual task checkpoints
+	var tasks []types.Task
+	for i, mt := range manualTasks {
+		tasks = append(tasks, types.Task{
+			ID:     fmt.Sprintf("manual-%d", i+1),
+			Name:   fmt.Sprintf("%s (from Plan %s)", mt.TaskName, mt.PlanName),
+			Type:   types.TaskTypeManual,
+			Files:  []string{mt.PlanPath},
+			Action: mt.TaskContent,
+			Done:   "Manual task completed and verified",
+			Status: types.StatusPending,
+		})
 	}
 
-	// Write verification section
-	content.WriteString(`## Verification
+	// Build verification items
+	verification := []string{
+		"All manual tasks completed",
+		"Verified each task's done criteria",
+	}
 
-- [ ] All manual tasks completed
-- [ ] Verified each task's done criteria
-`)
+	plan := &types.Plan{
+		Phase:        fmt.Sprintf("%02d-%s", phase.Number, phase.Name),
+		PlanNumber:   "99",
+		Status:       types.StatusPending,
+		Objective:    fmt.Sprintf("Complete all manual tasks that couldn't be automated during Phase %d execution", phase.Number),
+		Tasks:        tasks,
+		Verification: verification,
+		CreatedAt:    time.Now(),
+	}
 
-	return os.WriteFile(outPath, []byte(content.String()), 0644)
+	return state.SavePlanJSON(outPath, plan)
 }
 
 // ConvertToExecutionStructs converts JSON types to execution-compatible structs with paths
@@ -1454,9 +1386,9 @@ func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planD
 	phaseDir := filepath.Join(planningDir, "phases",
 		fmt.Sprintf("%02d-%s", phaseData.Number, slugify(phaseData.Name)))
 
-	// Build PLAN.md path (format: {phase}-{plan}-PLAN.md)
+	// Build plan path (format: {phase}-{plan}.json)
 	planPath := filepath.Join(phaseDir,
-		fmt.Sprintf("%02d-%s-PLAN.md", phaseData.Number, planData.PlanNumber))
+		fmt.Sprintf("%02d-%s.json", phaseData.Number, planData.PlanNumber))
 
 	// Extract plan name from objective or use default
 	planName := extractPlanName(planData.Objective)

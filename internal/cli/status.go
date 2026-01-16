@@ -33,24 +33,24 @@ Use --verbose for detailed information including decisions and issues.`,
 			return err
 		}
 
-		gsd := planner.NewGSD("", cwd)
+		p := planner.NewPlanner("", cwd)
 
 		// Check for required files
-		if !gsd.HasProject() {
+		if !p.HasProject() {
 			yellow := color.New(color.FgYellow).SprintFunc()
 			fmt.Printf("%s No project found\n\n", yellow("!"))
 			fmt.Println("Run 'ralph init' to create your project.")
 			return nil
 		}
 
-		if !gsd.HasRoadmap() {
+		if !p.HasRoadmap() {
 			yellow := color.New(color.FgYellow).SprintFunc()
 			fmt.Printf("%s Project found but no roadmap\n\n", yellow("!"))
 			fmt.Println("Run 'ralph roadmap' to create your phase breakdown.")
 			return nil
 		}
 
-		planningDir := gsd.PlanningDir()
+		planningDir := p.PlanningDir()
 
 		// Load state from JSON
 		projectState, err := state.LoadStateJSON(planningDir)
@@ -93,7 +93,7 @@ Use --verbose for detailed information including decisions and issues.`,
 				// Convert types.Plan to state.Plan for display
 				for _, jp := range jsonPlans {
 					summaryPath := filepath.Join(phaseDir,
-						fmt.Sprintf("%02d-%s-SUMMARY.md", p.Number, jp.PlanNumber))
+						fmt.Sprintf("%02d-%s-summary.json", p.Number, jp.PlanNumber))
 					_, summaryExists := os.Stat(summaryPath)
 					isComplete := jp.Status == "complete" || summaryExists == nil
 					if isComplete {
@@ -130,7 +130,7 @@ Use --verbose for detailed information including decisions and issues.`,
 		fmt.Printf("%s\n%s\n\n", bold(roadmap.ProjectName), dim(fmt.Sprintf("ralph v%s", Version)))
 
 		// Project artifacts
-		printArtifacts(gsd, phases, green, dim)
+		printArtifacts(p, phases, green, dim)
 
 		// Progress bar
 		if total > 0 {
@@ -176,11 +176,12 @@ Use --verbose for detailed information including decisions and issues.`,
 		printAvailableCommands(cyan, dim, bold)
 
 		// Tips
-		printTips(gsd, dim, bold)
+		printTips(p, dim, bold)
 
-		// Verbose mode: show phases
+		// Verbose mode: show all phases and plans with progress bars
 		if statusVerbose && len(phases) > 0 {
-			fmt.Println(bold("Phases:"))
+			fmt.Println(bold("All Phases:"))
+			fmt.Println()
 			for _, phase := range phases {
 				phaseComplete := 0
 				phaseTotal := len(phase.Plans)
@@ -188,6 +189,17 @@ Use --verbose for detailed information including decisions and issues.`,
 					if p.IsCompleted {
 						phaseComplete++
 					}
+				}
+
+				// Progress bar for phase
+				var bar string
+				if phaseTotal > 0 {
+					progress := float64(phaseComplete) / float64(phaseTotal)
+					barWidth := 10
+					filledWidth := int(progress * float64(barWidth))
+					bar = "[" + strings.Repeat("█", filledWidth) + strings.Repeat("░", barWidth-filledWidth) + "]"
+				} else {
+					bar = "[          ]"
 				}
 
 				var statusIcon string
@@ -199,17 +211,17 @@ Use --verbose for detailed information including decisions and issues.`,
 					statusIcon = "○"
 				}
 
-				fmt.Printf("  %s Phase %d: %s (%d/%d)\n", statusIcon, phase.Number, phase.Name, phaseComplete, phaseTotal)
+				fmt.Printf("%s Phase %d: %s %s %d/%d plans\n", statusIcon, phase.Number, phase.Name, bar, phaseComplete, phaseTotal)
 
 				for _, plan := range phase.Plans {
 					planIcon := "○"
 					if plan.IsCompleted {
 						planIcon = green("✓")
 					}
-					fmt.Printf("      %s %s\n", planIcon, plan.Name)
+					fmt.Printf("    %s %s\n", planIcon, plan.Name)
 				}
+				fmt.Println()
 			}
-			fmt.Println()
 		}
 
 		return nil
@@ -222,40 +234,40 @@ func init() {
 }
 
 // printArtifacts shows what artifacts exist in the project
-func printArtifacts(gsd *planner.GSD, phases []state.Phase, green, dim func(a ...interface{}) string) {
+func printArtifacts(p *planner.Planner, phases []state.Phase, green, dim func(a ...interface{}) string) {
 	fmt.Println(dim("📦 Project Artifacts:"))
 
-	// PROJECT.md
-	if gsd.HasProject() {
+	// project.json
+	if p.HasProject() {
 		projectDesc := dim("Project vision and requirements")
-		fmt.Printf("  %s PROJECT.md          %s\n", green("✓"), projectDesc)
+		fmt.Printf("  %s project.json          %s\n", green("✓"), projectDesc)
 	} else {
-		fmt.Printf("  %s PROJECT.md          %s\n", "○", dim("Not created"))
+		fmt.Printf("  %s project.json          %s\n", "○", dim("Not created"))
 	}
 
-	// ROADMAP.md
-	if gsd.HasRoadmap() {
+	// roadmap.json
+	if p.HasRoadmap() {
 		phaseCount := len(phases)
 		roadmapDesc := dim(fmt.Sprintf("%d phases defined", phaseCount))
-		fmt.Printf("  %s ROADMAP.md          %s\n", green("✓"), roadmapDesc)
+		fmt.Printf("  %s roadmap.json          %s\n", green("✓"), roadmapDesc)
 	} else {
-		fmt.Printf("  %s ROADMAP.md          %s\n", "○", dim("Not created"))
+		fmt.Printf("  %s roadmap.json          %s\n", "○", dim("Not created"))
 	}
 
 	// Codebase maps
-	if gsd.HasCodebaseMaps() {
-		mapCount := countCodebaseMaps(gsd)
+	if p.HasCodebaseMaps() {
+		mapCount := countCodebaseMaps(p)
 		mapsDesc := dim(fmt.Sprintf("%d analysis documents", mapCount))
 		fmt.Printf("  %s Codebase Maps       %s\n", green("✓"), mapsDesc)
 	} else {
 		fmt.Printf("  %s Codebase Maps       %s\n", "○", dim("Not analyzed yet"))
 	}
 
-	// STATE.md
-	if gsd.HasState() {
-		fmt.Printf("  %s STATE.md            %s\n", green("✓"), dim("Tracking execution"))
+	// state.json
+	if p.HasState() {
+		fmt.Printf("  %s state.json            %s\n", green("✓"), dim("Tracking execution"))
 	} else {
-		fmt.Printf("  %s STATE.md            %s\n", "○", dim("Not started"))
+		fmt.Printf("  %s state.json            %s\n", "○", dim("Not started"))
 	}
 
 	// Plans
@@ -279,15 +291,6 @@ func printSuggestedActions(phases []state.Phase, nextPlan *state.Plan, total, co
 	fmt.Println()
 
 	if nextPlan != nil {
-		// Check if there's a phase ready for review (has plans but none executed)
-		phaseReadyForReview := findPhaseReadyForReview(phases)
-		if phaseReadyForReview != nil {
-			fmt.Println("  Review before running:")
-			reviewCmd := fmt.Sprintf("ralph review %d", phaseReadyForReview.Number)
-			fmt.Printf("    %-30s %s\n", cyan(reviewCmd), dim("Walk through plans before first execution"))
-			fmt.Println()
-		}
-
 		// Has incomplete plans - suggest execution
 		fmt.Println("  Continue execution:")
 		fmt.Printf("    %-30s %s\n", cyan("ralph run"), dim("Execute next incomplete plan"))
@@ -298,49 +301,35 @@ func printSuggestedActions(phases []state.Phase, nextPlan *state.Plan, total, co
 		nextPhaseWithoutPlans := findNextPhaseWithoutPlans(phases)
 		if nextPhaseWithoutPlans != nil {
 			fmt.Println("  Plan ahead:")
-			cmd := fmt.Sprintf("ralph plan %d", nextPhaseWithoutPlans.Number)
-			desc := fmt.Sprintf("Create plans for Phase %d", nextPhaseWithoutPlans.Number)
-			fmt.Printf("    %-30s %s\n", cyan(cmd), dim(desc))
-
-			discussCmd := fmt.Sprintf("ralph discuss %d", nextPhaseWithoutPlans.Number)
-			discussDesc := fmt.Sprintf("Gather context before planning Phase %d", nextPhaseWithoutPlans.Number)
-			fmt.Printf("    %-30s %s\n", cyan(discussCmd), dim(discussDesc))
+			fmt.Printf("    %-30s %s\n", cyan("ralph discuss"), dim("Ralph will guide planning next phase"))
 			fmt.Println()
 		}
 
 		fmt.Println("  Review progress:")
-		fmt.Printf("    %-30s %s\n", cyan("ralph list"), dim("View all phases and plans"))
-		fmt.Printf("    %-30s %s\n", cyan("ralph status -v"), dim("Show detailed completion status"))
+		fmt.Printf("    %-30s %s\n", cyan("ralph status -v"), dim("View all phases and plans"))
 
 	} else if total == 0 {
-		// No plans yet - suggest planning first phase
-		fmt.Println("  Create your first plans:")
-		fmt.Printf("    %-30s %s\n", cyan("ralph discover 1"), dim("Research Phase 1 approach"))
-		fmt.Printf("    %-30s %s\n", cyan("ralph discuss 1"), dim("Discuss Phase 1 interactively"))
-		fmt.Printf("    %-30s %s\n", cyan("ralph plan 1"), dim("Create executable plans for Phase 1"))
+		// No plans yet - suggest discuss to get started
+		fmt.Println("  Get started:")
+		fmt.Printf("    %-30s %s\n", cyan("ralph discuss"), dim("Ralph will help create your roadmap and plans"))
 
 	} else {
 		// All plans in existing phases are complete
-		// Check if there are phases without plans (empty directories)
 		phaseNeedingPlans := findNextPhaseWithoutPlans(phases)
 		if phaseNeedingPlans != nil {
-			// Phase exists but has no plans - suggest planning it
-			// Find the last completed phase number
+			// Phase exists but has no plans - suggest discuss
 			lastCompletedPhase := 0
 			for _, p := range phases {
 				if p.IsCompleted && p.Number > lastCompletedPhase {
 					lastCompletedPhase = p.Number
 				}
 			}
-			fmt.Printf("  %s Phase %d complete! Next phase needs planning:\n", green("✓"), lastCompletedPhase)
-			fmt.Printf("    %-30s %s\n", cyan(fmt.Sprintf("ralph discuss %d", phaseNeedingPlans.Number)),
-				dim(fmt.Sprintf("Gather context for Phase %d", phaseNeedingPlans.Number)))
-			fmt.Printf("    %-30s %s\n", cyan(fmt.Sprintf("ralph plan %d", phaseNeedingPlans.Number)),
-				dim(fmt.Sprintf("Create plans for Phase %d", phaseNeedingPlans.Number)))
+			fmt.Printf("  %s Phase %d complete! Continue with:\n", green("✓"), lastCompletedPhase)
+			fmt.Printf("    %-30s %s\n", cyan("ralph discuss"), dim("Ralph will plan the next phase"))
 		} else {
 			// Truly all complete!
 			fmt.Printf("  %s All work complete! Consider:\n", green("✓"))
-			fmt.Printf("    %-30s %s\n", cyan("ralph add-phase \"description\""), dim("Add more work to roadmap"))
+			fmt.Printf("    %-30s %s\n", cyan("ralph discuss \"add new feature\""), dim("Discuss adding more work"))
 			fmt.Printf("    %s\n", dim("Or ship your milestone and start a new project"))
 		}
 	}
@@ -355,73 +344,49 @@ func printAvailableCommands(cyan, dim, bold func(a ...interface{}) string) {
 	fmt.Println(bold("🛠️  Available Commands:"))
 	fmt.Println()
 
-	fmt.Println(dim("Planning Workflow:"))
-	fmt.Printf("  %-32s %s\n", cyan("ralph init"), "Initialize new project (PROJECT.md)")
-	fmt.Printf("  %-32s %s\n", cyan("ralph map"), "Analyze codebase structure (brownfield)")
-	fmt.Printf("  %-32s %s\n", cyan("ralph roadmap"), "Create phase breakdown (ROADMAP.md)")
-	fmt.Println()
-
-	fmt.Println(dim("Phase Preparation:"))
-	fmt.Printf("  %-32s %s\n", cyan("ralph discover N"), "Research Phase N before planning")
-	fmt.Printf("  %-32s %s\n", cyan("ralph discuss N"), "Gather context for Phase N interactively")
-	fmt.Printf("  %-32s %s\n", cyan("ralph plan N"), "Create executable plans for Phase N")
-	fmt.Printf("  %-32s %s\n", cyan("ralph review N"), "Review plans before execution")
-	fmt.Println()
-
-	fmt.Println(dim("Execution:"))
+	fmt.Println(dim("Core Commands:"))
+	fmt.Printf("  %-32s %s\n", cyan("ralph discuss"), "Plan, update, review - Ralph decides context")
+	fmt.Printf("  %-32s %s\n", cyan("ralph discuss \"context\""), "Discuss with specific context")
 	fmt.Printf("  %-32s %s\n", cyan("ralph run"), "Execute next incomplete plan")
-	fmt.Printf("  %-32s %s\n", cyan("ralph run --loop [N]"), "Execute up to N plans (default: 5)")
+	fmt.Printf("  %-32s %s\n", cyan("ralph run --loop [N]"), "Execute up to N plans autonomously")
 	fmt.Printf("  %-32s %s\n", cyan("ralph status"), "Show this dashboard")
-	fmt.Printf("  %-32s %s\n", cyan("ralph list"), "List all phases and plans")
-	fmt.Println()
-
-	fmt.Println(dim("Roadmap Management:"))
-	fmt.Printf("  %-32s %s\n", cyan("ralph update"), "Conversational roadmap updates")
-	fmt.Printf("  %-32s %s\n", cyan("ralph add-phase \"desc\""), "Add new phase to end of roadmap")
-	fmt.Printf("  %-32s %s\n", cyan("ralph insert-phase N \"desc\""), "Insert urgent work as Phase N.1")
-	fmt.Printf("  %-32s %s\n", cyan("ralph remove-phase N"), "Remove phase and renumber")
+	fmt.Printf("  %-32s %s\n", cyan("ralph status -v"), "List all phases and plans")
 	fmt.Println()
 
 	fmt.Println(dim("Advanced:"))
 	fmt.Printf("  %-32s %s\n", cyan("ralph run --model opus"), "Use Claude Opus for complex plans")
-	fmt.Printf("  %-32s %s\n", cyan("ralph --help"), "Show detailed help for all commands")
+	fmt.Printf("  %-32s %s\n", cyan("ralph --help"), "Show detailed help")
 	fmt.Println()
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()
 }
 
 // printTips shows helpful context about Ralph workflow
-func printTips(gsd *planner.GSD, dim, bold func(a ...interface{}) string) {
+func printTips(p *planner.Planner, dim, bold func(a ...interface{}) string) {
 	fmt.Println(bold("💡 Tips:"))
 	fmt.Println()
 
-	fmt.Println(dim("• You have ONE roadmap per project (ROADMAP.md)"))
-	fmt.Println(dim("  To work on multiple projects, use separate directories"))
+	fmt.Println(dim("• Three commands: discuss, run, status"))
+	fmt.Println(dim("  'ralph discuss' handles all planning contextually"))
 	fmt.Println()
 
-	fmt.Println(dim("• Plans are auto-generated from phases"))
-	fmt.Println(dim("  'ralph plan N' creates PLAN.md files in .planning/phases/NN-name/"))
+	fmt.Println(dim("• Plans are stored in .planning/phases/NN-name/*.json"))
+	fmt.Println(dim("  Ralph creates plans automatically based on your roadmap"))
 	fmt.Println()
 
-	if !gsd.HasCodebaseMaps() {
-		fmt.Println(dim("• Maps are optional but helpful for brownfield projects"))
-		fmt.Println(dim("  'ralph map' creates 7 analysis docs in .planning/codebase/"))
-		fmt.Println()
-	}
-
-	fmt.Println(dim("• Use 'discuss' before 'plan' for complex phases"))
-	fmt.Println(dim("  Helps gather requirements and approach before creating plans"))
+	fmt.Println(dim("• One roadmap per project (roadmap.json)"))
+	fmt.Println(dim("  Use separate directories for multiple projects"))
 	fmt.Println()
 }
 
 // countCodebaseMaps counts the number of codebase map files that exist
-func countCodebaseMaps(gsd *planner.GSD) int {
+func countCodebaseMaps(p *planner.Planner) int {
 	expectedMaps := []string{
 		"ARCHITECTURE.md", "CONCERNS.md", "CONVENTIONS.md",
 		"INTEGRATIONS.md", "STACK.md", "STRUCTURE.md", "TESTING.md",
 	}
 	count := 0
-	codebaseDir := filepath.Join(gsd.PlanningDir(), "codebase")
+	codebaseDir := filepath.Join(p.PlanningDir(), "codebase")
 	for _, mapFile := range expectedMaps {
 		if _, err := os.Stat(filepath.Join(codebaseDir, mapFile)); err == nil {
 			count++

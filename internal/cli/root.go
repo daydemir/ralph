@@ -15,34 +15,28 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "ralph",
-	Short: "Autonomous plan execution with GSD planning",
-	Long: `Ralph is an autonomous execution engine built on Get Shit Done (GSD) planning.
+	Short: "Autonomous plan execution with intelligent planning",
+	Long: `Ralph is an autonomous execution engine with intelligent planning.
 
-Planning Commands:
-  init                Initialize a new project
-  roadmap             Create phase breakdown
-  map                 Analyze existing codebase
-  discover [N]        Research a phase
-  discuss [N]         Discuss a phase
-  plan [N]            Create executable plans for a phase
-
-Execution Commands:
+Core Commands:
+  discuss [context]   Plan, review, update - Ralph determines context
   run                 Execute the next incomplete plan
-  run --loop [N]      Autonomous loop (up to N plans)
-  status              Show current position
+  run --loop [N]      Autonomous execution (up to N plans)
+  status              Show current position and progress
+  status -v           Show all phases and plans
 
-Roadmap Modification:
-  add-phase "desc"         Add phase to end
-  insert-phase N "desc"    Insert as N.1
-  remove-phase N           Remove and renumber
+How ralph discuss works:
+  No project?    → Start project initialization
+  No roadmap?    → Create your phase breakdown
+  No plans?      → Create plans for current phase
+  Has plans?     → Review plans before execution
+  "context"      → Incorporate your input into the discussion
 
 Workflow:
-  1. ralph init              # Create PROJECT.md
-  2. ralph map               # Analyze codebase (brownfield)
-  3. ralph roadmap           # Create ROADMAP.md
-  4. ralph plan 1            # Create plans for Phase 1
-  5. ralph run               # Execute plans
-  6. ralph run --loop 5      # Autonomous execution`,
+  1. ralph discuss          # Creates project and roadmap
+  2. ralph discuss          # Creates plans for Phase 1
+  3. ralph run              # Execute plans
+  4. ralph run --loop 5     # Autonomous execution`,
 	Version: Version,
 }
 

@@ -23,7 +23,7 @@ discoveries from a specific plan.
 
 Examples:
   ralph digest                                    # Analyze most recently completed plan
-  ralph digest .planning/phases/01-*/01-03-PLAN.md  # Analyze specific plan
+  ralph digest .planning/phases/01-*/01-03.json   # Analyze specific plan
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
@@ -31,12 +31,12 @@ Examples:
 			return err
 		}
 
-		gsd := planner.NewGSD("", cwd)
-		if !gsd.HasRoadmap() {
-			return fmt.Errorf("no ROADMAP.md found - run 'ralph roadmap' first")
+		p := planner.NewPlanner("", cwd)
+		if !p.HasRoadmap() {
+			return fmt.Errorf("no roadmap found - run 'ralph discuss' first")
 		}
 
-		planningDir := gsd.PlanningDir()
+		planningDir := p.PlanningDir()
 
 		// Load roadmap for phases
 		roadmap, err := state.LoadRoadmapJSON(planningDir)

@@ -11,7 +11,7 @@
 
 > Built on [Get Shit Done (GSD)](https://github.com/glittercowboy/get-shit-done) planning and inspired by the [original Ralph concept](https://ghuntley.com/ralph/) by Geoffrey Huntley.
 
-Ralph executes your development plans automatically. You define what to build, Ralph breaks it into phases, creates detailed task plans, and executes them with verification. Each run preserves learnings in a `## Progress` section within the PLAN.md file for the next run.
+Ralph executes your development plans automatically. You define what to build, Ralph breaks it into phases, creates detailed task plans, and executes them with verification. Each run preserves learnings in a `## Progress` section within the plan JSON file for the next run.
 
 ## Table of Contents
 - [How It Works](#how-it-works)
@@ -60,28 +60,28 @@ Ralph uses a **phase-by-phase workflow**. You don't plan everything upfront - yo
 Ralph organizes work into a clear hierarchy. Here's how the structures nest:
 
 ```
-Project (PROJECT.md)
-├── Roadmap (ROADMAP.md)
+Project (project.json)
+├── Roadmap (roadmap.json)
 │   ├── Phase 1 (integer)
-│   │   ├── 01-01-PLAN.md
-│   │   ├── 01-01-SUMMARY.md
-│   │   └── 01-02-PLAN.md
+│   │   ├── 01-01.json
+│   │   ├── 01-01-summary.json
+│   │   └── 01-02.json
 │   ├── Phase 2 (integer)
-│   │   └── 02-01-PLAN.md
+│   │   └── 02-01.json
 │   ├── Phase 2.1 (decimal - INSERTED)
-│   │   └── 02.1-01-PLAN.md
+│   │   └── 02.1-01.json
 │   └── Phase 3 (integer)
 │       └── ...
-└── STATE.md
+└── state.json
 ```
 
 **Concepts:**
-- **Project** - Top-level vision and requirements (PROJECT.md)
-- **Roadmap** - Breakdown into phases (ROADMAP.md)
+- **Project** - Top-level vision and requirements (project.json)
+- **Roadmap** - Breakdown into phases (roadmap.json)
 - **Phase** - Unit of work, integer (1, 2, 3) or decimal (5.1 for urgent insertions)
-- **Plan** - Executable task bundle (NN-MM-PLAN.md)
+- **Plan** - Executable task bundle (NN-MM.json)
 - **Task** - Individual unit of work (XML in plan files)
-- **Summary** - Completion marker (NN-MM-SUMMARY.md)
+- **Summary** - Completion marker (NN-MM-summary.json)
 
 **Phase numbering:** Integer phases (1, 2, 3) are planned work. Decimal phases (5.1, 5.2) are urgent insertions that execute between surrounding integers (e.g., 5 → 5.1 → 6).
 
@@ -124,17 +124,17 @@ $ ralph status
 Ralph v2.0.0 - My Project
 
 📦 Project Artifacts:
-  ✓ PROJECT.md          Project vision and requirements
-  ✓ ROADMAP.md          10 phases defined
+  ✓ project.json        Project vision and requirements
+  ✓ roadmap.json        10 phases defined
   ✓ Codebase Maps       7 analysis documents
-  ✓ STATE.md            Tracking execution
+  ✓ state.json          Tracking execution
   ✓ Plans               3/10 phases have plans
 
 Progress: [████░░░░░░░░░░░░░░░░] 20% (4/20 plans)
 
 📍 Current Position:
   Phase: 2 of 10
-  Plan:  01-02-PLAN.md
+  Plan:  01-02.json
   Status: Ready to execute
 
 🎯 Suggested Next Actions:
@@ -149,12 +149,12 @@ $ ralph status -v
 ...
 Phases:
   ✓ Phase 1: Feature Verification (3/3)
-      ✓ 01-01-PLAN.md
-      ✓ 01-02-PLAN.md
-      ✓ 01-03-PLAN.md
+      ✓ 01-01.json
+      ✓ 01-02.json
+      ✓ 01-03.json
   ◐ Phase 2: Mix World Media (1/2)
-      ✓ 02-01-PLAN.md
-      ○ 02-02-PLAN.md
+      ✓ 02-01.json
+      ○ 02-02.json
   ○ Phase 3: Story Adaptation (0/0)
   ...
 ```
@@ -188,14 +188,14 @@ go install github.com/daydemir/ralph/cmd/ralph@latest
 
 ```bash
 # One-time setup
-ralph init              # Create PROJECT.md
+ralph init              # Create project.json
 ralph map               # Analyze existing codebase (brownfield projects)
-ralph roadmap           # Create ROADMAP.md with phases
+ralph roadmap           # Create roadmap.json with phases
 
 # Per-phase cycle
 ralph discover 1        # Research external APIs/docs (optional)
 ralph discuss 1         # Align on scope and approach (optional)
-ralph plan 1            # Create executable PLAN.md files
+ralph plan 1            # Create executable plan JSON files
 ralph run               # Execute plans (or: ralph run --loop 5)
 ```
 
@@ -205,17 +205,17 @@ Here's a complete cycle for one phase:
 
 ```bash
 # Phase 1: Authentication
-ralph discover 1        # → Creates .planning/phases/01-auth/RESEARCH.md
+ralph discover 1        # → Creates .planning/phases/01-auth/research.json
                         #   Researches OAuth providers, JWT libraries, etc.
 
-ralph discuss 1         # → Creates .planning/phases/01-auth/CONTEXT.md
+ralph discuss 1         # → Creates .planning/phases/01-auth/context.json
                         #   Alignment conversation about scope, edge cases
 
-ralph plan 1            # → Creates .planning/phases/01-auth/01-01-PLAN.md, etc.
+ralph plan 1            # → Creates .planning/phases/01-auth/01-01.json, etc.
                         #   Breaks phase into executable task files
 
 ralph run --loop        # Executes all plans for phase 1
-                        # STATE.md updates automatically
+                        # state.json updates automatically
 
 # Phase 1 complete → now repeat for Phase 2
 ralph discover 2
@@ -230,8 +230,8 @@ Before planning a phase, you can optionally run **discover** and/or **discuss** 
 
 | Command | Purpose | Output | When to Use |
 |---------|---------|--------|-------------|
-| `ralph discover N` | Research external docs, APIs, ecosystem options | `RESEARCH.md` | Unfamiliar domain, new libraries, API integrations |
-| `ralph discuss N` | Alignment conversation about scope/approach | `CONTEXT.md` | Complex decisions, unclear requirements, multiple approaches |
+| `ralph discover N` | Research external docs, APIs, ecosystem options | `research.json` | Unfamiliar domain, new libraries, API integrations |
+| `ralph discuss N` | Alignment conversation about scope/approach | `context.json` | Complex decisions, unclear requirements, multiple approaches |
 
 **Guidelines:**
 - **Familiar domain?** Skip discover, maybe run discuss for alignment
@@ -248,9 +248,9 @@ Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive 
 1. **Run the command** - A Claude conversation starts
 2. **Discuss with Claude** - Work through the topic until Claude indicates completion
 3. **Look for the completion signal** - Claude will say something like:
-   - "I've updated CONTEXT.md with our discussion"
-   - "I've created the PLAN.md files"
-   - "RESEARCH.md has been saved"
+   - "I've updated context.json with our discussion"
+   - "I've created the plan JSON files"
+   - "research.json has been saved"
 4. **Exit the session** - Type `/exit` or press `Ctrl+C`
 5. **Check progress** - Run `ralph status` to see your updated state
 
@@ -262,22 +262,22 @@ Commands `ralph discover`, `ralph discuss`, and `ralph plan` open **interactive 
 
 | Command | Description |
 |---------|-------------|
-| `ralph init` | Initialize project with GSD (creates PROJECT.md) |
-| `ralph roadmap` | Create phase breakdown (creates ROADMAP.md) |
+| `ralph init` | Initialize project with GSD (creates project.json) |
+| `ralph roadmap` | Create phase breakdown (creates roadmap.json) |
 | `ralph map` | Analyze existing codebase structure |
 
 ### Pre-Planning Commands (Optional)
 
 | Command | Description |
 |---------|-------------|
-| `ralph discover [N]` | Research phase N - external docs, APIs, options → RESEARCH.md |
-| `ralph discuss [N]` | Discuss phase N - scope and approach alignment → CONTEXT.md |
+| `ralph discover [N]` | Research phase N - external docs, APIs, options → research.json |
+| `ralph discuss [N]` | Discuss phase N - scope and approach alignment → context.json |
 
 ### Planning Commands
 
 | Command | Description |
 |---------|-------------|
-| `ralph plan [N]` | Create executable PLAN.md files for phase N |
+| `ralph plan [N]` | Create executable plan JSON files for phase N |
 | `ralph review [N]` | Review plans before execution - walk through tasks and verifications |
 
 ### Execution Commands
@@ -318,27 +318,27 @@ Ralph creates two directories:
 └── config.yaml         # Ralph configuration (optional)
 
 .planning/              # Created by GSD
-├── PROJECT.md          # Project vision and requirements
-├── ROADMAP.md          # Phase breakdown
-├── STATE.md            # Current position and progress
+├── project.json        # Project vision and requirements
+├── roadmap.json        # Phase breakdown
+├── state.json          # Current position and progress
 ├── codebase/           # Codebase analysis (from ralph map)
 │   ├── STACK.md
 │   ├── ARCHITECTURE.md
 │   └── ...
 └── phases/
     ├── 01-foundation/
-    │   ├── RESEARCH.md       # From ralph discover (optional)
-    │   ├── CONTEXT.md        # From ralph discuss (optional)
-    │   ├── 01-01-PLAN.md
-    │   ├── 01-01-SUMMARY.md
-    │   └── 01-02-PLAN.md
+    │   ├── research.json     # From ralph discover (optional)
+    │   ├── context.json      # From ralph discuss (optional)
+    │   ├── 01-01.json
+    │   ├── 01-01-summary.json
+    │   └── 01-02.json
     └── 02-authentication/
         └── ...
 ```
 
 ## Execution with Verification
 
-Each PLAN.md contains tasks with verification commands:
+Each plan JSON file contains tasks with verification commands:
 
 ```xml
 <task type="auto">
@@ -361,11 +361,11 @@ Ralph monitors for 60 minutes of **inactivity** (no output), not total duration.
 
 Claude's context degrades after ~100K tokens. Ralph uses a hybrid approach:
 
-1. **Progress tracking**: Claude updates a `## Progress` section in each PLAN.md after completing tasks
+1. **Progress tracking**: Claude updates a `## Progress` section in each plan JSON file after completing tasks
 2. **Self-monitoring**: Claude is instructed to bail out gracefully at ~100K tokens
 3. **Safety net**: Ralph terminates at 120K tokens if Claude hasn't bailed out
 
-When context runs low, Ralph preserves learnings in the PLAN.md file so the next run can continue where it left off.
+When context runs low, Ralph preserves learnings in the plan JSON file so the next run can continue where it left off.
 
 ## Autonomous Loop
 
@@ -373,20 +373,20 @@ When context runs low, Ralph preserves learnings in the PLAN.md file so the next
 - Fresh Claude context per plan (200k tokens)
 - Automatic verification between plans
 - Immediate stop on failure
-- Progress tracking in STATE.md
+- Progress tracking in state.json
 
 ```bash
 $ ralph run --loop 5
 === Ralph Autonomous Loop ===
 
-Iteration 1/5: 01-01-PLAN.md
+Iteration 1/5: 01-01.json
 [12:34:56] Executing: Foundation setup
 [12:35:12] ✓ Task 1/3 complete
 [12:36:01] ✓ Task 2/3 complete
 [12:37:15] ✓ Task 3/3 complete
 ✓ Complete (2m 19s)
 
-Iteration 2/5: 01-02-PLAN.md
+Iteration 2/5: 01-02.json
 ...
 ```
 
@@ -402,7 +402,7 @@ ralph run --loop 20 --max-retries 3    # 20 iterations, max 3 retries per plan
 ```
 
 On retry, Ralph:
-1. Analyzes what happened (checks Progress section, SUMMARY.md existence)
+1. Analyzes what happened (checks Progress section, summary.json existence)
 2. Provides context about previous attempts to Claude
 3. Instructs Claude to log progress before each action (to capture state if interrupted again)
 
@@ -410,7 +410,7 @@ On retry, Ralph:
 
 Plans can contain manual tasks (`type="manual"`) that require human action (e.g., adding files in Xcode, clicking through UI flows). Ralph handles these automatically:
 
-1. **At phase start:** Ralph scans all plans and bundles manual tasks into `XX-99-manual-PLAN.md`
+1. **At phase start:** Ralph scans all plans and bundles manual tasks into `XX-99-manual.json`
 2. **During execution:** Claude skips manual tasks and records them as observations
 3. **At phase end:** The manual plan runs last, presenting all human tasks in one place
 
@@ -421,8 +421,8 @@ This keeps automation flowing while collecting human work for batch completion.
 Phase 2 has plans: 02-01, 02-02, 02-03 (with 2 manual tasks), 02-04
 
 Ralph creates:
-- 02-00-decisions-PLAN.md (runs first, if decisions exist)
-- 02-99-manual-PLAN.md (runs last, contains the 2 manual tasks)
+- 02-00-decisions.json (runs first, if decisions exist)
+- 02-99-manual.json (runs last, contains the 2 manual tasks)
 
 Execution order: 02-00 → 02-01 → 02-02 → 02-03 → 02-04 → 02-99
 ```
@@ -434,7 +434,7 @@ After each plan completes, Ralph runs an **analysis agent** that reviews discove
 ### What It Does
 
 The analysis agent:
-- Reads `## Discoveries` section from the completed PLAN.md
+- Reads `## Discoveries` section from the completed plan JSON file
 - Reviews all remaining plans in the current and future phases
 - Updates plans based on findings (adds context, blockers, notes)
 - Runs even on failures to help diagnose issues
@@ -510,11 +510,11 @@ Ralph uses sensible defaults if no config file exists.
 | Problem | Solution |
 |---------|----------|
 | "GSD not installed" error | Run `npm install -g get-shit-done-cc` to install GSD |
-| "No ROADMAP.md found" | Run `ralph init` then `ralph roadmap` first |
-| Plan execution fails | Run `ralph status -v` to see current state, check the PLAN.md file for issues, fix manually then retry |
+| "No roadmap.json found" | Run `ralph init` then `ralph roadmap` first |
+| Plan execution fails | Run `ralph status -v` to see current state, check the plan JSON file for issues, fix manually then retry |
 | "Context exceeded" errors | Plan may be too large - break the phase into smaller sub-phases |
 | Claude hangs or times out | Check network connection; Ralph has 60-minute inactivity timeout (not total time) |
-| Wrong phase executing | Check STATE.md in `.planning/` - manually edit if needed to reset position |
+| Wrong phase executing | Check state.json in `.planning/` - manually edit if needed to reset position |
 | Ralph was interrupted mid-plan | Run `ralph status` to see state, then `ralph run` to resume |
 
 ## Previous Version

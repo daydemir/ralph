@@ -2,40 +2,135 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/daydemir/ralph/internal/planner"
+	"github.com/daydemir/ralph/internal/state"
 	"github.com/spf13/cobra"
 )
 
 var discussCmd = &cobra.Command{
-	Use:   "discuss [phase-number]",
-	Short: "Discuss a phase before planning",
-	Long: `Have an interactive discussion about a phase before creating plans.
+	Use:   "discuss [context]",
+	Short: "Plan, review, update - Ralph determines what to do",
+	Long: `Start an interactive planning session with Claude.
 
-Requires: ROADMAP.md (run 'ralph roadmap' first)
+Ralph inspects your current project state and starts the appropriate discussion:
 
-This opens a conversation to explore scope, approaches, and concerns.
-Creates: .planning/phases/{phase}/CONTEXT.md
+  No project?       → Initialize a new project
+  No roadmap?       → Create your phase breakdown
+  No plans?         → Create plans for the current phase
+  Has plans?        → Review plans or discuss updates
 
-Great for getting alignment on implementation approach before committing.
-After discussion, run 'ralph plan N' to create executable plans.
+You can optionally provide context to guide the discussion:
 
-Accepts both integer (5) and decimal (5.1) phase numbers.`,
-	Args: cobra.ExactArgs(1),
+  ralph discuss                    # Ralph decides based on state
+  ralph discuss "need to add auth" # Ralph incorporates your context
+
+This replaces the individual init, roadmap, plan, review, and update commands
+with a single intelligent entry point.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		phase, err := ValidatePhaseNumber(args[0])
-		if err != nil {
-			return err
-		}
-
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
 
-		gsd := planner.NewGSD("", cwd)
-		return gsd.DiscussPhase(context.Background(), phase)
+		p := planner.NewPlanner("", cwd)
+		ctx := context.Background()
+
+		// Get optional user context
+		var userContext string
+		if len(args) > 0 {
+			userContext = strings.TrimSpace(args[0])
+		}
+
+		// Determine what to do based on state
+		if !p.HasProject() {
+			// No project - initialize
+			fmt.Println("Starting project initialization...")
+			if userContext != "" {
+				fmt.Printf("Context: %s\n\n", userContext)
+			}
+			return p.NewProject(ctx)
+		}
+
+		if !p.HasRoadmap() {
+			// Has project but no roadmap - create roadmap
+			fmt.Println("Creating project roadmap...")
+			if userContext != "" {
+				fmt.Printf("Context: %s\n\n", userContext)
+			}
+			return p.CreateRoadmap(ctx)
+		}
+
+		// Has roadmap - check for plans
+		planningDir := p.PlanningDir()
+		roadmap, err := state.LoadRoadmapJSON(planningDir)
+		if err != nil {
+			return fmt.Errorf("cannot load roadmap: %w", err)
+		}
+
+		// Find the first phase without plans or with incomplete plans
+		for _, phase := range roadmap.Phases {
+			phaseDir := state.FindPhaseDirByNumber(planningDir, phase.Number)
+			if phaseDir == "" {
+				// No directory for this phase yet - create plans
+				fmt.Printf("Planning Phase %d: %s...\n", phase.Number, phase.Name)
+				if userContext != "" {
+					fmt.Printf("Context: %s\n\n", userContext)
+				}
+				return p.PlanPhase(ctx, fmt.Sprintf("%d", phase.Number))
+			}
+
+			// Check if this phase has plans
+			plans, err := state.LoadAllPlansJSON(phaseDir)
+			if err != nil || len(plans) == 0 {
+				// No plans - create them
+				fmt.Printf("Planning Phase %d: %s...\n", phase.Number, phase.Name)
+				if userContext != "" {
+					fmt.Printf("Context: %s\n\n", userContext)
+				}
+				return p.PlanPhase(ctx, fmt.Sprintf("%d", phase.Number))
+			}
+
+			// Check if all plans are complete
+			allComplete := true
+			for _, plan := range plans {
+				if plan.Status != "complete" {
+					allComplete = false
+					break
+				}
+			}
+
+			if !allComplete {
+				// Has incomplete plans - offer to review or update
+				if userContext != "" {
+					// User has context - do an update discussion
+					fmt.Printf("Discussing updates for Phase %d...\n", phase.Number)
+					fmt.Printf("Context: %s\n\n", userContext)
+					return p.UpdateRoadmap(ctx)
+				}
+				// No context - offer review
+				fmt.Printf("Reviewing Phase %d plans before execution...\n", phase.Number)
+				return p.ReviewPlans(ctx, fmt.Sprintf("%d", phase.Number))
+			}
+		}
+
+		// All phases have complete plans
+		if userContext != "" {
+			// User wants to discuss something - update roadmap
+			fmt.Println("Discussing roadmap updates...")
+			fmt.Printf("Context: %s\n\n", userContext)
+			return p.UpdateRoadmap(ctx)
+		}
+
+		// Everything is complete
+		fmt.Println("All phases have plans and are complete!")
+		fmt.Println("\nTo add more work, run:")
+		fmt.Println("  ralph discuss \"description of new work\"")
+		return nil
 	},
 }
 

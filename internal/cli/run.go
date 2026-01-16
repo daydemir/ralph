@@ -51,18 +51,18 @@ Verification failures stop the loop immediately.`,
 			return err
 		}
 
-		gsd := planner.NewGSD("", cwd)
+		p := planner.NewPlanner("", cwd)
 
 		// Check for required planning artifacts
-		if !gsd.HasRoadmap() {
-			return fmt.Errorf(`no ROADMAP.md found
+		if !p.HasRoadmap() {
+			return fmt.Errorf(`no roadmap found
 
 Ralph requires proper planning before execution.
-Run 'ralph roadmap' first to create your phase breakdown.
-Then 'ralph plan 1' to create plans for Phase 1.`)
+Run 'ralph discuss' to create your roadmap.
+Then run 'ralph discuss' again to create plans for Phase 1.`)
 		}
 
-		planningDir := gsd.PlanningDir()
+		planningDir := p.PlanningDir()
 
 		// Find next plan using JSON roadmap
 		phaseData, planData, err := state.FindNextPlanJSON(planningDir)

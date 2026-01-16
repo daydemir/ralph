@@ -284,3 +284,179 @@ func (s *ProjectState) Validate() error {
 	}
 	return nil
 }
+
+// Project represents the project definition (project.json)
+type Project struct {
+	Version     string    `json:"version"`     // Schema version "1.0"
+	Name        string    `json:"name"`        // Project name
+	Description string    `json:"description"` // Project description
+	Goals       []string  `json:"goals"`       // Project goals
+	TechStack   []string  `json:"tech_stack"`  // Technologies used
+	Constraints []string  `json:"constraints"` // Key constraints
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Validate ensures the project is valid
+func (p *Project) Validate() error {
+	if p.Version == "" {
+		return fmt.Errorf("project.version: field is required")
+	}
+	if p.Name == "" {
+		return fmt.Errorf("project.name: field is required")
+	}
+	if p.CreatedAt.IsZero() {
+		return fmt.Errorf("project.created_at: field is required")
+	}
+	if p.UpdatedAt.IsZero() {
+		return fmt.Errorf("project.updated_at: field is required")
+	}
+	return nil
+}
+
+// Summary represents a plan execution summary ({phase}-{plan}-summary.json)
+type Summary struct {
+	Version        string        `json:"version"`
+	Phase          string        `json:"phase"`
+	PlanNumber     string        `json:"plan_number"`
+	OneLiner       string        `json:"one_liner"`       // Substantive summary
+	TasksCompleted []TaskResult  `json:"tasks_completed"`
+	KeyChanges     []string      `json:"key_changes"`
+	FilesModified  []string      `json:"files_modified"`
+	Deviations     []Deviation   `json:"deviations"`
+	Observations   []Observation `json:"observations"`
+	Duration       string        `json:"duration"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+
+// TaskResult represents a completed task in the summary
+type TaskResult struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status Status `json:"status"`
+	Commit string `json:"commit"`
+}
+
+// Deviation represents a deviation from the plan
+type Deviation struct {
+	Rule   int      `json:"rule"`   // Rule 1-4
+	Type   string   `json:"type"`   // bug, blocking, etc.
+	Title  string   `json:"title"`
+	Issue  string   `json:"issue"`
+	Fix    string   `json:"fix"`
+	Files  []string `json:"files"`
+	Commit string   `json:"commit"`
+}
+
+// Observation represents a finding captured during execution
+type Observation struct {
+	Type     string `json:"type"`           // bug, stub, insight, etc.
+	Severity string `json:"severity"`       // critical, high, medium, low, info
+	Title    string `json:"title"`
+	Detail   string `json:"detail"`
+	File     string `json:"file,omitempty"`
+	Action   string `json:"action"`         // needs-fix, needs-plan, none
+}
+
+// Validate ensures the summary is valid
+func (s *Summary) Validate() error {
+	if s.Version == "" {
+		return fmt.Errorf("summary.version: field is required")
+	}
+	if s.Phase == "" {
+		return fmt.Errorf("summary.phase: field is required")
+	}
+	if s.PlanNumber == "" {
+		return fmt.Errorf("summary.plan_number: field is required")
+	}
+	if s.OneLiner == "" {
+		return fmt.Errorf("summary.one_liner: field is required")
+	}
+	if s.CreatedAt.IsZero() {
+		return fmt.Errorf("summary.created_at: field is required")
+	}
+	return nil
+}
+
+// Context represents phase discussion context ({phase}-context.json)
+type Context struct {
+	Version           string    `json:"version"`
+	Phase             int       `json:"phase"`
+	PhaseName         string    `json:"phase_name"`
+	DiscussionSummary string    `json:"discussion_summary"`
+	UserVision        []string  `json:"user_vision"`
+	Requirements      []string  `json:"requirements"`
+	Constraints       []string  `json:"constraints"`
+	Preferences       []string  `json:"preferences"`
+	MustHaves         []string  `json:"must_haves"`
+	NiceToHaves       []string  `json:"nice_to_haves"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+// Validate ensures the context is valid
+func (c *Context) Validate() error {
+	if c.Version == "" {
+		return fmt.Errorf("context.version: field is required")
+	}
+	if c.Phase <= 0 {
+		return fmt.Errorf("context.phase: must be positive")
+	}
+	if c.PhaseName == "" {
+		return fmt.Errorf("context.phase_name: field is required")
+	}
+	if c.CreatedAt.IsZero() {
+		return fmt.Errorf("context.created_at: field is required")
+	}
+	return nil
+}
+
+// Research represents phase research findings ({phase}-research.json)
+type Research struct {
+	Version        string           `json:"version"`
+	Phase          int              `json:"phase"`
+	PhaseName      string           `json:"phase_name"`
+	DiscoveryLevel int              `json:"discovery_level"` // 0-3
+	Summary        string           `json:"summary"`
+	Recommendation string           `json:"recommendation"`
+	KeyFindings    []string         `json:"key_findings"`
+	Risks          []Risk           `json:"risks"`
+	Options        []ResearchOption `json:"options,omitempty"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
+// Risk represents a risk identified during research
+type Risk struct {
+	Description string `json:"description"`
+	Likelihood  string `json:"likelihood"` // low, medium, high
+	Impact      string `json:"impact"`     // low, medium, high
+	Mitigation  string `json:"mitigation"`
+}
+
+// ResearchOption represents an option evaluated during research
+type ResearchOption struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Pros        []string `json:"pros"`
+	Cons        []string `json:"cons"`
+	Score       int      `json:"score,omitempty"`
+}
+
+// Validate ensures the research is valid
+func (r *Research) Validate() error {
+	if r.Version == "" {
+		return fmt.Errorf("research.version: field is required")
+	}
+	if r.Phase <= 0 {
+		return fmt.Errorf("research.phase: must be positive")
+	}
+	if r.PhaseName == "" {
+		return fmt.Errorf("research.phase_name: field is required")
+	}
+	if r.DiscoveryLevel < 0 || r.DiscoveryLevel > 3 {
+		return fmt.Errorf("research.discovery_level: must be between 0 and 3")
+	}
+	if r.CreatedAt.IsZero() {
+		return fmt.Errorf("research.created_at: field is required")
+	}
+	return nil
+}
