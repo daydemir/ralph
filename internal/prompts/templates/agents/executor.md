@@ -98,10 +98,10 @@ Execute each task in the plan.
    - Update Progress section
    - Continue to next task
 
-3. **If `type="manual"` or `type="checkpoint:*"`:**
-   - Record as deferred observation
+3. **If `type="manual"`:**
+   - Record as deferred observation (type="finding")
    - Skip and continue to next task
-   - These are bundled to phase-end manual plan
+   - Manual tasks are bundled to phase-end plan
 
 4. Run overall verification checks from plan.verification array
 5. Confirm all tasks complete
@@ -181,25 +181,27 @@ Store progress in memory as you execute. When bailing out or completing, ensure 
 Record observations AS YOU GO using XML format:
 
 ```xml
-<observation type="TYPE" severity="SEVERITY">
+<observation type="TYPE">
   <title>Short descriptive title</title>
-  <detail>What you found and why it matters</detail>
+  <description>What you found and why it matters</description>
   <file>path/to/relevant/file</file>
-  <action>ACTION</action>
 </observation>
 ```
 
-**Types:** bug, stub, api-issue, insight, blocker, technical-debt, assumption, scope-creep, dependency, questionable, already-complete, checkpoint-automated, tooling-friction, test-failed, test-infrastructure, manual-checkpoint-deferred
+**Types (3 only):**
+- **blocker**: Can't continue without human intervention
+- **finding**: Noticed something interesting (bugs, stubs, technical debt, etc.)
+- **completion**: Work was already done or not needed
 
-**Severities:** critical, high, medium, low, info
-
-**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+**The analyzer decides severity and actions from your description.**
 
 **Low bar - record everything:**
-- "3 tests are stubs" → type="stub"
-- "File has no tests" → type="insight"
-- "Function deprecated but still used" → type="technical-debt"
-- "Took 30 min because docs wrong" → type="tooling-friction"
+- "3 tests are stubs" → type="finding"
+- "File has no tests" → type="finding"
+- "Function deprecated but still used" → type="finding"
+- "Took 30 min because docs wrong" → type="finding"
+- "Work already done" → type="completion"
+- "Need API credentials" → type="blocker"
 
 The analysis agent needs DATA. Under-reporting = no analysis.
 
@@ -207,26 +209,26 @@ The analysis agent needs DATA. Under-reporting = no analysis.
 ```
 Task(subagent_type="general-purpose", prompt="
   Add this observation to summary.json:
-  <observation type=\"stub\" severity=\"medium\">
+  <observation type=\"finding\">
     <title>3 backend tests are stubs</title>
-    ...
+    <description>Tests exist but have no assertions - need implementation</description>
+    <file>src/tests/</file>
   </observation>
 ")
 ```
 </observation_recording>
 
 <manual_task_handling>
-When encountering `type="manual"` or `type="checkpoint:human-action"`:
+When encountering `type="manual"`:
 
 **DO NOT wait for user input.** You are running in autonomous mode.
 
 1. Record the task as an observation:
 ```xml
-<observation type="manual-checkpoint-deferred" severity="info">
+<observation type="finding">
   <title>Manual task deferred: [task name]</title>
-  <detail>Task requires human action. Bundled to phase-end manual plan.</detail>
+  <description>Task requires human action. Bundled to phase-end manual plan.</description>
   <file>[relevant file if any]</file>
-  <action>none</action>
 </observation>
 ```
 
@@ -234,7 +236,7 @@ When encountering `type="manual"` or `type="checkpoint:human-action"`:
 
 3. At plan end: Note deferred manual tasks in summary.json
 
-**Why:** Manual tasks are bundled into a separate XX-99-manual plan that runs at phase end. This keeps automation flowing.
+**Why:** Manual tasks are bundled into a separate XX-99 plan that runs at phase end. This keeps automation flowing.
 </manual_task_handling>
 
 <pre_existing_work>
@@ -242,11 +244,10 @@ When you find work is ALREADY COMPLETE:
 
 1. **Record an observation:**
 ```xml
-<observation type="already-complete" severity="info">
+<observation type="completion">
   <title>Task N already implemented</title>
-  <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
+  <description>The [what] already exists at [path]. Likely done in previous session.</description>
   <file>path/to/existing/file</file>
-  <action>none</action>
 </observation>
 ```
 
@@ -313,12 +314,10 @@ After all tasks complete, create `{phase}-{plan}-summary.json` in the phase dire
   ],
   "observations": [
     {
-      "type": "stub",
-      "severity": "medium",
+      "type": "finding",
       "title": "3 backend tests are stubs",
-      "detail": "Tests exist but have no assertions",
-      "file": "src/tests/auth.test.ts",
-      "action": "needs-implementation"
+      "description": "Tests exist but have no assertions - need implementation",
+      "file": "src/tests/auth.test.ts"
     }
   ],
   "duration": "45 minutes",

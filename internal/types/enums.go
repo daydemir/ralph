@@ -66,24 +66,16 @@ func (s Status) String() string {
 }
 
 // ObservationType represents the type of observation
+// Radically simplified: Running agents just observe, analyzer decides actions
 type ObservationType string
 
 const (
-	ObsTypeBug                ObservationType = "bug"
-	ObsTypeStub               ObservationType = "stub"
-	ObsTypeAPIIssue           ObservationType = "api-issue"
-	ObsTypeInsight            ObservationType = "insight"
-	ObsTypeBlocker            ObservationType = "blocker"
-	ObsTypeTechnicalDebt      ObservationType = "technical-debt"
-	ObsTypeAssumption         ObservationType = "assumption"
-	ObsTypeScopeCreep         ObservationType = "scope-creep"
-	ObsTypeDependency         ObservationType = "dependency"
-	ObsTypeQuestionable       ObservationType = "questionable"
-	ObsTypeAlreadyComplete    ObservationType = "already-complete"
-	ObsTypeManualDeferred     ObservationType = "manual-checkpoint-deferred"
-	ObsTypeToolingFriction    ObservationType = "tooling-friction"
-	ObsTypeTestFailed         ObservationType = "test-failed"
-	ObsTypeTestInfrastructure ObservationType = "test-infrastructure"
+	// ObsTypeBlocker indicates the agent can't continue without human intervention
+	ObsTypeBlocker ObservationType = "blocker"
+	// ObsTypeFinding indicates something interesting was noticed
+	ObsTypeFinding ObservationType = "finding"
+	// ObsTypeCompletion indicates work was already done or not needed
+	ObsTypeCompletion ObservationType = "completion"
 )
 
 // IsValid checks if an observation type is valid
@@ -98,84 +90,10 @@ func (o ObservationType) IsValid() bool {
 
 // AllObservationTypes returns all valid observation type values
 func AllObservationTypes() []ObservationType {
-	return []ObservationType{
-		ObsTypeBug, ObsTypeStub, ObsTypeAPIIssue, ObsTypeInsight,
-		ObsTypeBlocker, ObsTypeTechnicalDebt, ObsTypeAssumption,
-		ObsTypeScopeCreep, ObsTypeDependency, ObsTypeQuestionable,
-		ObsTypeAlreadyComplete, ObsTypeManualDeferred, ObsTypeToolingFriction,
-		ObsTypeTestFailed, ObsTypeTestInfrastructure,
-	}
+	return []ObservationType{ObsTypeBlocker, ObsTypeFinding, ObsTypeCompletion}
 }
 
 // String returns the string representation of the observation type
 func (o ObservationType) String() string {
 	return string(o)
-}
-
-// Severity represents observation severity
-type Severity string
-
-const (
-	SeverityCritical Severity = "critical"
-	SeverityHigh     Severity = "high"
-	SeverityMedium   Severity = "medium"
-	SeverityLow      Severity = "low"
-	SeverityInfo     Severity = "info"
-)
-
-// IsValid checks if a severity value is valid
-func (s Severity) IsValid() bool {
-	for _, valid := range AllSeverities() {
-		if s == valid {
-			return true
-		}
-	}
-	return false
-}
-
-// AllSeverities returns all valid severity values
-func AllSeverities() []Severity {
-	return []Severity{SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityInfo}
-}
-
-// String returns the string representation of the severity
-func (s Severity) String() string {
-	return string(s)
-}
-
-// ObservationAction represents what action is needed
-type ObservationAction string
-
-const (
-	ActionNeedsFix            ObservationAction = "needs-fix"
-	ActionNeedsImplementation ObservationAction = "needs-implementation"
-	ActionNeedsPlan           ObservationAction = "needs-plan"
-	ActionNeedsInvestigation  ObservationAction = "needs-investigation"
-	ActionNeedsDocumentation  ObservationAction = "needs-documentation"
-	ActionNeedsHumanVerify    ObservationAction = "needs-human-verify"
-	ActionNone                ObservationAction = "none"
-)
-
-// IsValid checks if an observation action is valid
-func (a ObservationAction) IsValid() bool {
-	for _, valid := range AllObservationActions() {
-		if a == valid {
-			return true
-		}
-	}
-	return false
-}
-
-// AllObservationActions returns all valid observation action values
-func AllObservationActions() []ObservationAction {
-	return []ObservationAction{
-		ActionNeedsFix, ActionNeedsImplementation, ActionNeedsPlan,
-		ActionNeedsInvestigation, ActionNeedsDocumentation,
-		ActionNeedsHumanVerify, ActionNone,
-	}
-}
-
-// String returns the string representation of the observation action
-func (a ObservationAction) String() string {
-	return string(a)
 }

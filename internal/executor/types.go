@@ -3,48 +3,25 @@ package executor
 import (
 	"regexp"
 	"strings"
+
+	"github.com/daydemir/ralph/internal/types"
 )
 
-// TaskType represents the type of a task in plan XML
-type TaskType string
+// TaskType is an alias to the canonical types.TaskType
+type TaskType = types.TaskType
 
+// Task type constants - re-exported from types package for convenience
 const (
-	// TaskTypeAuto is the default task type - executed automatically
-	TaskTypeAuto TaskType = "auto"
-	// TaskTypeManual requires human action
-	TaskTypeManual TaskType = "manual"
-	// TaskTypeCheckpoint is a human-action checkpoint that blocks execution
-	TaskTypeCheckpoint TaskType = "checkpoint:human-action"
-	// TaskTypeDecision is a decision point that requires human choice
-	TaskTypeDecision TaskType = "checkpoint:decision"
+	TaskTypeAuto   = types.TaskTypeAuto
+	TaskTypeManual = types.TaskTypeManual
 )
 
 // ValidTaskTypes is the exhaustive list of allowed task types
-var ValidTaskTypes = []TaskType{
-	TaskTypeAuto,
-	TaskTypeManual,
-	TaskTypeCheckpoint,
-	TaskTypeDecision,
-}
-
-// IsValid checks if a task type is valid
-func (t TaskType) IsValid() bool {
-	for _, valid := range ValidTaskTypes {
-		if t == valid {
-			return true
-		}
-	}
-	return false
-}
+var ValidTaskTypes = types.AllTaskTypes()
 
 // RequiresHumanAction returns true if this task type requires human intervention
-func (t TaskType) RequiresHumanAction() bool {
-	return t == TaskTypeManual || t == TaskTypeCheckpoint
-}
-
-// IsDecisionPoint returns true if this task type is a decision checkpoint
-func (t TaskType) IsDecisionPoint() bool {
-	return t == TaskTypeDecision
+func RequiresHumanAction(t TaskType) bool {
+	return t == TaskTypeManual
 }
 
 // taskTypePattern is the compiled regex for extracting task type attributes
@@ -71,7 +48,7 @@ type InvalidTaskTypeError struct {
 }
 
 func (e *InvalidTaskTypeError) Error() string {
-	return "invalid task type: " + e.Type + " (valid: auto, manual, checkpoint:human-action, checkpoint:decision)"
+	return "invalid task type '" + e.Type + "'. Valid: auto, manual"
 }
 
 // ValidatePlanTasks checks that all task types in a plan content are valid.
@@ -97,24 +74,19 @@ func ValidatePlanTasks(planContent string) error {
 }
 
 // containsHumanActionTask checks if output mentions any human-action task types
-// Used for soft failure analysis to detect when Claude hit a manual checkpoint
+// Used for soft failure analysis to detect when Claude hit a manual task
 func containsHumanActionTask(output string) bool {
-	// Check for explicit "MANUAL CHECKPOINT" marker (used by Claude when presenting checkpoints)
-	if strings.Contains(output, "MANUAL CHECKPOINT") {
+	// Check for explicit "MANUAL" markers
+	if strings.Contains(output, "MANUAL CHECKPOINT") || strings.Contains(output, "MANUAL TASK") {
 		return true
 	}
 
-	// Check for any task type that requires human action
-	for _, taskType := range ValidTaskTypes {
-		if taskType.RequiresHumanAction() {
-			// Check both the raw type string and the XML attribute format
-			if strings.Contains(output, string(taskType)) {
-				return true
-			}
-			if strings.Contains(output, `type="`+string(taskType)+`"`) {
-				return true
-			}
-		}
+	// Check for manual task type in output
+	if strings.Contains(output, string(TaskTypeManual)) {
+		return true
+	}
+	if strings.Contains(output, `type="manual"`) {
+		return true
 	}
 	return false
 }

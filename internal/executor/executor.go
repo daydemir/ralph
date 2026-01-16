@@ -583,25 +583,13 @@ To maximize effectiveness:
 </task>
 
 <constraints>
-OBSERVATION TYPES (Ralph-specific):
-- bug: Bug found that needs fixing
-- stub: Stub/placeholder code that needs implementation
-- api-issue: External API problem or inconsistency
-- insight: Useful information for future plans
-- blocker: Something blocking progress
-- technical-debt: Code that works but needs improvement
-- assumption: Decision made without full information
-- scope-creep: Work discovered that wasn't in the plan
-- dependency: Unexpected dependency between tasks/plans
-- questionable: Suspicious code or pattern worth reviewing
-- already-complete: Work was already done before execution
-- checkpoint-automated: Checkpoint verification that was automated
-- tooling-friction: Tool/environment issue that slowed progress
-- test-failed: Test(s) failed during execution - enumerate test names
-- test-infrastructure: Test environment issue (simulator, timeout, xcodebuild syntax)
+OBSERVATION TYPES (Simplified - 3 types only):
+- blocker: Can't continue without human intervention
+- finding: Noticed something interesting (bugs, stubs, technical debt, etc.)
+- completion: Work was already done or not needed
 
-SEVERITIES: critical, high, medium, low, info
-ACTIONS: needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+Running agent just asks: "Does this stop me?" → blocker. "No?" → finding or completion.
+The analyzer decides severity and actions from context - you just observe.
 </constraints>
 
 <output-format>
@@ -611,13 +599,15 @@ Prose observations like "## Discovery: ..." or "**Finding:** ..." CANNOT be pars
 You MUST use this exact XML format:
 
 `+"```"+`xml
-<observation type="TYPE" severity="SEVERITY">
+<observation type="TYPE">
   <title>Short descriptive title</title>
-  <detail>What you found and why it matters</detail>
+  <description>What you found and why it matters</description>
   <file>path/to/relevant/file</file>
-  <action>ACTION</action>
 </observation>
 `+"```"+`
+
+TYPE is one of: blocker, finding, completion
+The analyzer infers severity and decides actions from your description.
 
 RALPH SIGNALS:
 - ###PLAN_COMPLETE### - All tasks done, verified, builds and tests pass
@@ -633,57 +623,31 @@ RALPH SIGNALS:
 WHAT TO OBSERVE (LOW BAR - Record Everything):
 
 Record routine findings. Examples:
-- "3 tests in X are stubs" -> type="stub", action="needs-implementation"
-- "File Y has no tests" -> type="insight", action="needs-plan"
-- "Function Z is deprecated but used in 5 places" -> type="technical-debt", action="needs-fix"
-- "This took 30 min because docs were wrong" -> type="tooling-friction", action="needs-documentation"
-- "Tests already exist for X" -> type="already-complete", action="none"
-- "Found TODO comment in code" -> type="stub", action="needs-implementation"
-- "API returns different format than docs say" -> type="api-issue", action="needs-investigation"
+- "3 tests in X are stubs" -> type="finding" with description
+- "File Y has no tests" -> type="finding" with description
+- "Function Z is deprecated but used in 5 places" -> type="finding"
+- "This took 30 min because docs were wrong" -> type="finding"
+- "Tests already exist for X" -> type="completion"
+- "Need API credentials to continue" -> type="blocker"
 
 The analysis agent needs DATA to work with. Under-reporting = no analysis happens.
+The analyzer decides severity and actions - you just describe what you found.
 
-DOCUMENTING TEST FAILURES (CRITICAL):
+DOCUMENTING TEST FAILURES:
 
-Test failures require STRUCTURED observations, not prose notes. The analysis agent:
-- Can detect patterns across plans (e.g., "xcodebuild issues in 4/5 plans")
-- Can recommend infrastructure fixes when issues repeat
-- CANNOT parse prose like "tests failed, see output"
+When tests fail, use type="finding" with detailed description:
 
-When tests fail:
-1. Use type="test-failed" (NOT generic "blocker")
-2. List EACH failed test by name
-3. Include error messages or expected vs actual
-4. For tooling issues (xcodebuild syntax), use type="test-infrastructure"
-
-Example - Test Failures:
 `+"```"+`xml
-<observation type="test-failed" severity="high">
+<observation type="finding">
   <title>3 SpatialAudioService tests failing</title>
-  <detail>
+  <description>
     Failed tests:
     - testPlaySpatialAudio_atPosition: Expected position (1,2,3), got (0,0,0)
     - testStopAllSpatialAudio: Source still playing after stop
     - testPauseSpatialAudio: Playback not paused
     Root cause: uninitialized position variable in SpatialAudioService.play()
-  </detail>
+  </description>
   <file>ar/AR/Unit Tests iOS/AudioSpatialTests.swift</file>
-  <action>needs-fix</action>
-</observation>
-`+"```"+`
-
-Example - Test Infrastructure:
-`+"```"+`xml
-<observation type="test-infrastructure" severity="medium">
-  <title>xcodebuild -only-testing syntax unclear</title>
-  <detail>
-    Spent 30+ minutes on xcodebuild test filtering. Attempted syntaxes:
-    - -only-testing:TestTarget/TestClass (Unknown build action error)
-    - -only-testing "TestTarget/TestClass" (same error)
-    Documentation unclear. This blocked test verification for SpatialAudioService.
-  </detail>
-  <file>ar/AR/AR.xcodeproj</file>
-  <action>needs-documentation</action>
 </observation>
 `+"```"+`
 
@@ -694,11 +658,10 @@ Recording observations inline burns your main context. Use Task tool to delegate
 `+"```"+`
 Task(subagent_type="general-purpose", prompt="
   Add this observation to PLAN.md in the Observations section:
-  <observation type=\"stub\" severity=\"medium\">
+  <observation type=\"finding\">
     <title>3 backend tests are stubs</title>
-    <detail>image.test.ts and video.test.ts have stub tests</detail>
+    <description>image.test.ts and video.test.ts have stub tests that need implementation</description>
     <file>mix-backend/functions/src/__tests__/endpoints/</file>
-    <action>needs-implementation</action>
   </observation>
 ")
 `+"```"+`
@@ -707,15 +670,14 @@ Record observations AS YOU GO - don't batch them at the end.
 
 PRE-EXISTING WORK HANDLING:
 
-When you find that work in a task is ALREADY COMPLETE (files exist, code already implemented):
+When you find that work in a task is ALREADY COMPLETE:
 
 1. Record an observation:
    `+"```"+`xml
-   <observation type="already-complete" severity="info">
+   <observation type="completion">
      <title>Task N already implemented</title>
-     <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
+     <description>The [what] already exists at [path]. Likely done in previous session.</description>
      <file>path/to/existing/file</file>
-     <action>none</action>
    </observation>
    `+"```"+`
 
@@ -752,17 +714,16 @@ Ralph will verify summary.json exists before accepting the completion signal.
 
 MANUAL TASK HANDLING (AUTONOMOUS MODE - CRITICAL):
 
-When encountering a task with type="manual" or type="checkpoint:human-action":
+When encountering a task with type="manual":
 
 DO NOT wait for user input. You are running in autonomous mode without interactive input.
 
 1. Record the task as an observation:
 `+"```"+`xml
-<observation type="manual-checkpoint-deferred" severity="info">
+<observation type="finding">
   <title>Manual task deferred: [task name]</title>
-  <detail>Task requires human action. Bundled to phase-end manual plan.</detail>
+  <description>Task requires human action. Bundled to phase-end manual plan.</description>
   <file>[relevant file if any]</file>
-  <action>none</action>
 </observation>
 `+"```"+`
 
@@ -770,12 +731,12 @@ DO NOT wait for user input. You are running in autonomous mode without interacti
 
 3. At plan end: Note deferred manual tasks in summary.json
 
-Why: Manual tasks are bundled into a separate XX-99-manual-PLAN.md that runs at phase end.
+Why: Manual tasks are bundled into a separate XX-99 plan that runs at phase end.
 This keeps automation flowing while collecting human work.
 
 Example handling:
 - See task: `+"`<task type=\"manual\">Add file to Xcode...</task>`"+`
-- Record observation with type="manual-checkpoint-deferred"
+- Record observation with type="finding" describing the deferred task
 - Skip the task
 - Continue with next auto task
 - In summary.json: "Deferred 1 manual task to phase-end plan"
@@ -846,39 +807,40 @@ This ensures the next run can continue where you left off if context runs low.
 **CRITICAL: The analyzer CANNOT parse prose. You MUST use XML format.**
 
 Record observations LIBERALLY. Low-bar examples:
-- "3 tests are stubs" → type="stub"
-- "File X has no tests" → type="insight"
-- "Function Y deprecated but still used" → type="technical-debt"
-- "Took 30 min because docs wrong" → type="tooling-friction"
+- "3 tests are stubs" → type="finding"
+- "File X has no tests" → type="finding"
+- "Function Y deprecated but still used" → type="finding"
+- "Took 30 min because docs wrong" → type="finding"
+- "Work already done" → type="completion"
+- "Need credentials to proceed" → type="blocker"
 
 Add a ## Observations section to PLAN.md with XML entries:
 
 `+"```"+`xml
-<observation type="TYPE" severity="SEVERITY">
+<observation type="TYPE">
   <title>Brief title</title>
-  <detail>What you found and why it matters</detail>
+  <description>What you found and why it matters</description>
   <file>path/to/relevant/file.ts</file>
-  <action>ACTION</action>
 </observation>
 `+"```"+`
 
-**Types:** bug, stub, api-issue, insight, blocker, technical-debt, tooling-friction, env-discovery, assumption, scope-creep, dependency, questionable, already-complete, checkpoint-automated
+**Types (3 only):**
+- blocker: Can't continue without human intervention
+- finding: Noticed something interesting
+- completion: Work already done or not needed
 
-**Severity:** critical, high, medium, low, info
-**Actions:** needs-fix, needs-implementation, needs-plan, needs-investigation, needs-documentation, needs-human-verify, none
+The analyzer decides severity and actions from your description.
 
 Example observations:
-<observation type="tooling-friction" severity="info">
+<observation type="finding">
   <title>Xcode test target naming</title>
-  <detail>Test target is "Unit Tests iOS", not "Tests iOS". Found via xcodebuild -list</detail>
+  <description>Test target is "Unit Tests iOS", not "Tests iOS". Found via xcodebuild -list</description>
   <file>ar/AR/AR.xcodeproj</file>
-  <action>needs-documentation</action>
 </observation>
 
-<observation type="scope-creep" severity="high">
+<observation type="finding">
   <title>Need to update 3 additional files</title>
-  <detail>The auth change requires updating UserService, ProfileView, and SettingsView which weren't in the plan.</detail>
-  <action>needs-plan</action>
+  <description>The auth change requires updating UserService, ProfileView, and SettingsView which weren't in the plan.</description>
 </observation>
 
 Record observations AS YOU GO - don't batch at end. Under-reporting = no analysis happens.
@@ -889,11 +851,10 @@ When you find work is ALREADY COMPLETE:
 
 1. **Record an observation:**
    `+"```"+`xml
-   <observation type="already-complete" severity="info">
+   <observation type="completion">
      <title>Task N already implemented</title>
-     <detail>The [what] already exists at [path]. Likely done in previous session.</detail>
+     <description>The [what] already exists at [path]. Likely done in previous session.</description>
      <file>path/to/existing/file</file>
-     <action>none</action>
    </observation>
    `+"```"+`
 
@@ -1183,54 +1144,12 @@ type DecisionCheckpoint struct {
 	Context     string
 }
 
-// MaybeCreateDecisionsPlan scans a phase for checkpoint:decision tasks and creates a bundled decisions plan
+// MaybeCreateDecisionsPlan is deprecated - checkpoint:decision no longer exists
+// All decision scenarios should now use type="manual" with descriptive action field
 func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
-	// Check if decisions plan already exists
-	decisionsPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-00.json", phase.Number))
-	if _, err := os.Stat(decisionsPath); err == nil {
-		// Decisions plan already exists
-		return false, nil
-	}
-
-	// Scan all plans in this phase for checkpoint:decision tasks
-	var decisions []DecisionCheckpoint
-	decisionPattern := regexp.MustCompile(`(?s)<task\s+type="checkpoint:decision"[^>]*>(.*?)</task>`)
-
-	for _, plan := range phase.Plans {
-		content, err := os.ReadFile(plan.Path)
-		if err != nil {
-			continue
-		}
-
-		matches := decisionPattern.FindAllStringSubmatch(string(content), -1)
-		for _, match := range matches {
-			if len(match) > 1 {
-				decisions = append(decisions, DecisionCheckpoint{
-					PlanNumber:  plan.Number,
-					PlanName:    plan.Name,
-					PlanPath:    plan.Path,
-					TaskContent: strings.TrimSpace(match[1]),
-				})
-			}
-		}
-	}
-
-	if len(decisions) == 0 {
-		// No decisions found in this phase
-		return false, nil
-	}
-
-	e.display.Info("Decisions", fmt.Sprintf("Found %d checkpoints, creating decisions plan...", len(decisions)))
-
-	// Create the decisions plan
-	err := e.createDecisionsPlan(phase, decisions, decisionsPath)
-	if err != nil {
-		return false, err
-	}
-
-	e.display.Info("Decisions", fmt.Sprintf("Created %s", filepath.Base(decisionsPath)))
-
-	return true, nil
+	// No-op: checkpoint:decision type has been removed
+	// Decision tasks are now just manual tasks with descriptive action fields
+	return false, nil
 }
 
 // createDecisionsPlan generates the bundled decisions plan file in JSON format
@@ -1278,7 +1197,7 @@ type ManualTask struct {
 	TaskContent string
 }
 
-// MaybeCreateManualTasksPlan scans a phase for manual and checkpoint:human-action tasks and creates a bundled manual tasks plan
+// MaybeCreateManualTasksPlan scans a phase for manual tasks and creates a bundled manual tasks plan
 func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) {
 	// Check if manual tasks plan already exists
 	manualPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99.json", phase.Number))
@@ -1287,7 +1206,7 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 		return false, nil
 	}
 
-	// Scan all plans in this phase for tasks that require human action
+	// Scan all plans in this phase for manual tasks
 	var manualTasks []ManualTask
 	// Match task with type attribute for extraction
 	taskWithTypePattern := regexp.MustCompile(`(?s)(<task\s+[^>]*>)(.*?)(</task>)`)
@@ -1298,7 +1217,7 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 			continue
 		}
 
-		// Find all tasks and check their types using the TaskType enum
+		// Find all tasks and check their types
 		matches := taskWithTypePattern.FindAllStringSubmatch(string(content), -1)
 		for i, match := range matches {
 			if len(match) > 3 {
@@ -1313,8 +1232,8 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 					continue
 				}
 
-				// Only bundle tasks that require human action
-				if taskType.RequiresHumanAction() {
+				// Only bundle manual tasks
+				if RequiresHumanAction(taskType) {
 					manualTasks = append(manualTasks, ManualTask{
 						PlanNumber:  plan.Number,
 						PlanName:    plan.Name,

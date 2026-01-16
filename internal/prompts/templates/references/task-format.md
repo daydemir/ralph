@@ -34,7 +34,7 @@ Each task in the `tasks` array:
 }
 ```
 
-## Task Types
+## Task Types (2 types only)
 
 ### `auto` - Fully Autonomous
 Claude can complete without human intervention.
@@ -58,58 +58,50 @@ Claude can complete without human intervention.
 ### `manual` - Requires Human Action
 Task cannot be automated, requires human intervention.
 
-**Use sparingly:** Only for truly unavoidable manual steps.
+**Use for all scenarios where human input is needed:**
+- Visual verification (UI checks, layout, styling)
+- Implementation decisions (technology selection, architecture choices)
+- External actions (email verification, SMS codes)
+- Physical device interaction
 
-**Example:**
+**Example - Visual Verification:**
 ```json
 {
   "id": "task-2",
+  "name": "Verify dashboard layout",
+  "type": "manual",
+  "files": [],
+  "action": "Visit http://localhost:3000/dashboard and verify: sidebar visible on desktop, collapses on mobile, no layout shifts.",
+  "verify": "User confirms dashboard displays correctly",
+  "done": "Dashboard layout approved",
+  "status": "pending"
+}
+```
+
+**Example - Implementation Decision:**
+```json
+{
+  "id": "task-3",
+  "name": "Select authentication provider",
+  "type": "manual",
+  "files": [],
+  "action": "Choose between Supabase Auth, Clerk, or NextAuth based on project requirements. Options: (1) Supabase Auth - Built-in with DB, less customizable. (2) Clerk - Best DX, paid after 10k MAU. (3) NextAuth - Free, flexible, more setup.",
+  "verify": "Decision documented",
+  "done": "Authentication provider selected and documented",
+  "status": "pending"
+}
+```
+
+**Example - External Action:**
+```json
+{
+  "id": "task-4",
   "name": "Verify email authentication link",
   "type": "manual",
   "files": [],
   "action": "Click the verification link sent to the user's email. This cannot be automated as it requires accessing an external email inbox.",
   "verify": "User's email_verified field is true in database",
   "done": "Email verification complete",
-  "status": "pending"
-}
-```
-
-### `checkpoint:human-verify` - Visual/Functional Verification
-Claude completed automated work, human confirms it works correctly.
-
-**Use for:** UI checks, interactive flows, visual verification.
-
-**Example:**
-```json
-{
-  "id": "task-3",
-  "name": "Verify dashboard layout",
-  "type": "checkpoint:human-verify",
-  "action": "Verify the dashboard displays correctly",
-  "verify": "Visit http://localhost:3000/dashboard and confirm: sidebar visible on desktop, collapses on mobile, no layout shifts",
-  "done": "User confirms dashboard looks correct",
-  "status": "pending"
-}
-```
-
-### `checkpoint:decision` - Implementation Choice
-Human must make a decision that affects implementation direction.
-
-**Use for:** Technology selection, architecture decisions.
-
-**Example:**
-```json
-{
-  "id": "task-4",
-  "name": "Select authentication provider",
-  "type": "checkpoint:decision",
-  "action": "Choose between Supabase Auth, Clerk, or NextAuth based on project requirements",
-  "options": [
-    {"id": "supabase", "name": "Supabase Auth", "pros": "Built-in with DB", "cons": "Less customizable"},
-    {"id": "clerk", "name": "Clerk", "pros": "Best DX", "cons": "Paid after 10k MAU"},
-    {"id": "nextauth", "name": "NextAuth", "pros": "Free, flexible", "cons": "More setup"}
-  ],
-  "done": "Authentication provider selected",
   "status": "pending"
 }
 ```
@@ -121,22 +113,20 @@ Human must make a decision that affects implementation direction.
 | `pending` | Not yet started |
 | `in_progress` | Currently being executed |
 | `complete` | Successfully completed |
-| `failed` | Failed and cannot continue |
-| `skipped` | Intentionally skipped |
-| `blocked` | Waiting on external factor |
+| `failed` | Failed (covers skipped/blocked cases) |
 
 ## Task Field Requirements
 
-| Field | auto | manual | checkpoint:* |
-|-------|------|--------|--------------|
-| id | Required | Required | Required |
-| name | Required | Required | Required |
-| type | Required | Required | Required |
-| files | Required | Optional | N/A |
-| action | Required | Required | Required |
-| verify | Required | Optional | Optional |
-| done | Required | Required | Required |
-| status | Required | Required | Required |
+| Field | auto | manual |
+|-------|------|--------|
+| id | Required | Required |
+| name | Required | Required |
+| type | Required | Required |
+| files | Required | Optional |
+| action | Required | Required |
+| verify | Required | Optional |
+| done | Required | Required |
+| status | Required | Required |
 
 ## Writing Good Tasks
 
@@ -196,6 +186,15 @@ Each task should take Claude **15-60 minutes** to execute:
 - One task just sets up for the next
 - Separate tasks touch the same file
 - Neither task is meaningful alone
+
+## Invalid Task Types
+
+The following are **NOT valid** task types and will cause validation errors:
+- `checkpoint:human-verify`
+- `checkpoint:human-action`
+- `checkpoint:decision`
+
+All checkpoint scenarios should use `type: "manual"` with a descriptive action field.
 
 ## Example Complete Plan
 

@@ -121,12 +121,12 @@ Examples:
 
 		fmt.Printf("Found %d observations:\n\n", len(observations))
 		for i, o := range observations {
-			fmt.Printf("%d. [%s/%s] %s\n", i+1, o.Type, o.Severity, o.Title)
-			fmt.Printf("   %s\n", o.Detail)
+			fmt.Printf("%d. [%s] %s\n", i+1, o.Type, o.Title)
+			fmt.Printf("   %s\n", o.Description)
 			if o.File != "" {
 				fmt.Printf("   File: %s\n", o.File)
 			}
-			fmt.Printf("   Action: %s\n\n", o.Action)
+			fmt.Println()
 		}
 
 		// Check for actionable observations

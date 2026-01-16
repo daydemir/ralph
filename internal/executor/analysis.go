@@ -17,13 +17,12 @@ import (
 )
 
 // Observation represents a finding captured during plan execution
+// Simplified: Running agents observe, analyzer infers severity and decides actions
 type Observation struct {
-	Type     string // bug, stub, api-issue, insight, blocker, technical-debt, etc.
-	Severity string // critical, high, medium, low, info
-	Title    string
-	Detail   string
-	File     string
-	Action   string // needs-fix, needs-implementation, needs-plan, needs-investigation, none
+	Type        string // blocker, finding, or completion
+	Title       string // Short descriptive title
+	Description string // What was noticed and agent's thoughts
+	File        string // Where (optional)
 }
 
 // ExecutionContext holds context about a failed execution for recovery analysis
@@ -140,7 +139,7 @@ func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan
 }
 
 // ParseObservations extracts observation blocks from PLAN.md content
-// Also supports legacy <discovery> tags for backward compatibility
+// Supports both new simplified format and legacy format for backward compatibility
 func ParseObservations(content string, disp *display.Display) []Observation {
 	// Check for prose observations that can't be parsed
 	prosePattern := regexp.MustCompile(`(?i)(##\s*Discovery:|##\s*Observation:|\*\*Discovery\*\*:|\*\*Finding\*\*:|\[Discovery)`)
@@ -152,24 +151,46 @@ func ParseObservations(content string, disp *display.Display) []Observation {
 
 	var observations []Observation
 
-	// Match both <observation> and <discovery> blocks (for backward compat)
-	pattern := regexp.MustCompile(`(?s)<(observation|discovery)\s+type="([^"]+)"\s+severity="([^"]+)">\s*` +
+	// New simplified format: <observation type="TYPE"><title>...</title><description>...</description><file>...</file></observation>
+	newPattern := regexp.MustCompile(`(?s)<observation\s+type="([^"]+)">\s*` +
+		`<title>([^<]+)</title>\s*` +
+		`<description>([^<]*)</description>\s*` +
+		`(?:<file>([^<]*)</file>\s*)?` +
+		`</observation>`)
+
+	matches := newPattern.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) >= 4 {
+			o := Observation{
+				Type:        strings.TrimSpace(match[1]),
+				Title:       strings.TrimSpace(match[2]),
+				Description: strings.TrimSpace(match[3]),
+				File:        "",
+			}
+			if len(match) >= 5 {
+				o.File = strings.TrimSpace(match[4])
+			}
+			observations = append(observations, o)
+		}
+	}
+
+	// Legacy format for backward compatibility: <observation type="TYPE" severity="SEVERITY">...<detail>...<action>...</observation>
+	legacyPattern := regexp.MustCompile(`(?s)<(observation|discovery)\s+type="([^"]+)"\s+severity="([^"]+)">\s*` +
 		`<title>([^<]+)</title>\s*` +
 		`<detail>([^<]+)</detail>\s*` +
 		`(?:<file>([^<]*)</file>\s*)?` +
 		`<action>([^<]+)</action>\s*` +
 		`</(observation|discovery)>`)
 
-	matches := pattern.FindAllStringSubmatch(content, -1)
-	for _, match := range matches {
+	legacyMatches := legacyPattern.FindAllStringSubmatch(content, -1)
+	for _, match := range legacyMatches {
 		if len(match) >= 8 {
+			// Convert legacy format to new format
 			o := Observation{
-				Type:     strings.TrimSpace(match[2]),
-				Severity: strings.TrimSpace(match[3]),
-				Title:    strings.TrimSpace(match[4]),
-				Detail:   strings.TrimSpace(match[5]),
-				File:     strings.TrimSpace(match[6]),
-				Action:   strings.TrimSpace(match[7]),
+				Type:        strings.TrimSpace(match[2]),
+				Title:       strings.TrimSpace(match[4]),
+				Description: strings.TrimSpace(match[5]),
+				File:        strings.TrimSpace(match[6]),
 			}
 			observations = append(observations, o)
 		}
@@ -217,19 +238,19 @@ func ParseSummaryObservations(content string) []Observation {
 		block := content[blockStart:blockEnd]
 
 		// Extract details from bullet points
-		var detail, file string
+		var description, file string
 
 		// Issue line
 		if issueMatch := regexp.MustCompile(`(?m)-\s*\*\*Issue:\*\*\s*(.+)`).FindStringSubmatch(block); len(issueMatch) > 1 {
-			detail = strings.TrimSpace(issueMatch[1])
+			description = strings.TrimSpace(issueMatch[1])
 		}
 
-		// Fix line (append to detail)
+		// Fix line (append to description)
 		if fixMatch := regexp.MustCompile(`(?m)-\s*\*\*Fix:\*\*\s*(.+)`).FindStringSubmatch(block); len(fixMatch) > 1 {
-			if detail != "" {
-				detail += " | Fix: " + strings.TrimSpace(fixMatch[1])
+			if description != "" {
+				description += " | Fix: " + strings.TrimSpace(fixMatch[1])
 			} else {
-				detail = "Fix: " + strings.TrimSpace(fixMatch[1])
+				description = "Fix: " + strings.TrimSpace(fixMatch[1])
 			}
 		}
 
@@ -238,32 +259,20 @@ func ParseSummaryObservations(content string) []Observation {
 			file = strings.TrimSpace(fileMatch[1])
 		}
 
-		// Determine action based on context
-		action := "none" // Auto-fixed issues are already resolved
-		if strings.Contains(strings.ToLower(block), "pending") || strings.Contains(strings.ToLower(block), "blocker") {
-			action = "needs-fix"
-		}
-
-		// Map type strings to standard types
-		switch obsType {
-		case "bug":
-			obsType = "bug"
-		case "code fix", "code-fix":
-			obsType = "bug"
-		default:
-			// Keep as-is or default to insight
-			if obsType == "" {
-				obsType = "insight"
-			}
+		// Map legacy type strings to new simplified types
+		// Most auto-fixed issues are "findings" that were resolved
+		mappedType := "finding"
+		if strings.Contains(strings.ToLower(block), "blocker") {
+			mappedType = "blocker"
+		} else if strings.Contains(strings.ToLower(obsType), "complete") || strings.Contains(strings.ToLower(obsType), "done") {
+			mappedType = "completion"
 		}
 
 		observations = append(observations, Observation{
-			Type:     obsType,
-			Severity: "medium", // Auto-fixed issues are typically medium
-			Title:    title,
-			Detail:   detail,
-			File:     file,
-			Action:   action,
+			Type:        mappedType,
+			Title:       title,
+			Description: description,
+			File:        file,
 		})
 	}
 
@@ -312,12 +321,12 @@ func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *s
 func (e *Executor) buildAnalysisPrompt(plan *state.Plan, observations []Observation, subsequentPlans []string) string {
 	var observationsText strings.Builder
 	for i, o := range observations {
-		observationsText.WriteString(fmt.Sprintf("%d. [%s/%s] %s\n", i+1, o.Type, o.Severity, o.Title))
-		observationsText.WriteString(fmt.Sprintf("   Detail: %s\n", o.Detail))
+		observationsText.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, o.Type, o.Title))
+		observationsText.WriteString(fmt.Sprintf("   Description: %s\n", o.Description))
 		if o.File != "" {
 			observationsText.WriteString(fmt.Sprintf("   File: %s\n", o.File))
 		}
-		observationsText.WriteString(fmt.Sprintf("   Action: %s\n\n", o.Action))
+		observationsText.WriteString("\n")
 	}
 
 	return fmt.Sprintf(`You are analyzing observations from a completed plan execution.
@@ -335,18 +344,18 @@ func (e *Executor) buildAnalysisPrompt(plan *state.Plan, observations []Observat
 
 Review each observation and determine its impact on subsequent plans.
 
-### Observation Types and Actions
+### Observation Types (Simplified)
 
-**High-impact types for plan restructuring:**
-- **assumption**: A decision was made without full information - check if subsequent plans rely on this assumption
-- **scope-creep**: Work was discovered that wasn't in any plan - may require new plans
-- **dependency**: An unexpected dependency was found - may require plan reordering
-- **questionable**: Suspicious code was found - add review notes to relevant plans
+There are only 3 observation types - you decide severity and actions from context:
 
-**Standard types:**
-- **bug**, **stub**, **api-issue**: May need fixes before dependent plans proceed
-- **technical-debt**, **tooling-friction**, **env-discovery**: Document for future reference
-- **insight**, **blocker**: May affect how subsequent tasks are approached
+- **blocker**: Agent couldn't continue without human intervention - investigate why
+- **finding**: Something interesting was noticed - analyze the description to decide impact
+- **completion**: Work was already done or not needed - may allow skipping plans
+
+Your job is to analyze the **description** field to understand:
+- What category of issue this is (bug, stub, dependency, scope-creep, etc.)
+- How severe it is (critical, high, medium, low)
+- What action is needed (needs-fix, needs-plan, none, etc.)
 
 ### Plan Restructuring Authority
 
@@ -414,31 +423,34 @@ ALL restructuring changes MUST be reflected in roadmap.json:
 - New plans: Add entry at appropriate position
 - Skipped plans: Mark with SKIPPED status and reason
 
-### Action Guidelines
+### Analysis Guidelines
 
-For observations with action "needs-fix", "needs-implementation", or "needs-plan":
-1. Read the relevant subsequent plan files
-2. Determine if the observation:
+For each observation, analyze the description to determine impact:
+
+**Blockers** - Investigate whether they're legitimate:
+1. Search for similar issues that were solved before
+2. Check if workarounds exist
+3. If truly blocked, document why human action is required
+4. If solvable, add guidance to subsequent plans
+
+**Findings** - Determine what action is needed:
+1. Read the description to understand the category (bug, stub, dependency, etc.)
+2. Decide if it:
    - Invalidates tasks in a plan (work is already done, or approach is wrong) -> SKIP the plan
    - Means a dependency must be resolved first -> REORDER plans
    - Requires work not covered by any plan -> CREATE new plan
-   - Suggests plan order should change -> REORDER plans
+   - Just needs documentation -> Note for CLAUDE.md update
 
-For observations with action "needs-documentation":
-1. Suggest updates to CLAUDE.md or project documentation
-2. Note which tooling friction or environment observations should be captured
-3. Add context to plans if the documentation affects their execution
-
-For observations with action "needs-investigation":
-1. Add investigation notes to relevant plans
-2. Flag assumptions that need verification before proceeding
-3. Consider creating a new investigation plan if scope is significant
+**Completions** - Verify and update plans:
+1. Check if subsequent plans can be skipped
+2. Document evidence of completion
+3. Update roadmap accordingly
 
 ### Test Failure Pattern Analysis
 
-When reviewing test-related observations (test-failed, test-infrastructure, tooling-friction):
+When reviewing findings that describe test failures (look for keywords like "test failed", "xcodebuild", "npm test"):
 
-1. **Count occurrences**: If same test infrastructure issue appears in 2+ plans:
+1. **Count occurrences**: If same test infrastructure issue appears in 2+ observations:
    - Create a new "fix-test-infrastructure" plan to resolve it once
    - Example: "xcodebuild syntax issues in 3 plans -> create plan to document working patterns in CLAUDE.md"
 
@@ -501,31 +513,22 @@ Signal completion with: ###ANALYSIS_COMPLETE###
 `, plan.Path, observationsText.String(), strings.Join(subsequentPlans, "\n"))
 }
 
-// HasActionableObservations returns true if any observations require action
+// HasActionableObservations returns true if any observations are blockers or findings
+// (completions don't require action)
 func HasActionableObservations(observations []Observation) bool {
 	for _, o := range observations {
-		switch o.Action {
-		case "needs-fix", "needs-implementation", "needs-plan", "needs-investigation", "needs-documentation":
+		if o.Type == "blocker" || o.Type == "finding" {
 			return true
 		}
 	}
 	return false
 }
 
-// FilterBySeverity returns observations at or above the given severity
-func FilterBySeverity(observations []Observation, minSeverity string) []Observation {
-	severityOrder := map[string]int{
-		"critical": 5,
-		"high":     4,
-		"medium":   3,
-		"low":      2,
-		"info":     1,
-	}
-
-	minLevel := severityOrder[minSeverity]
+// FilterByType returns observations of a specific type
+func FilterByType(observations []Observation, obsType string) []Observation {
 	var filtered []Observation
 	for _, o := range observations {
-		if severityOrder[o.Severity] >= minLevel {
+		if o.Type == obsType {
 			filtered = append(filtered, o)
 		}
 	}
@@ -543,7 +546,8 @@ type CheckpointVerification struct {
 	NeedsHuman     []string // What still needs human review
 }
 
-// CollectCheckpointObservations scans all completed plans in a phase for checkpoint-automated observations
+// CollectCheckpointObservations scans all completed plans in a phase for observations that need human verification
+// Now looks for "finding" observations with descriptions mentioning verification needed
 func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []CheckpointVerification {
 	var verifications []CheckpointVerification
 
@@ -560,7 +564,10 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 
 		observations := ParseObservations(string(content), nil)
 		for _, o := range observations {
-			if o.Type == "checkpoint-automated" && o.Action == "needs-human-verify" {
+			// Look for findings that mention verification or human review needed
+			if o.Type == "finding" && (strings.Contains(strings.ToLower(o.Description), "needs human") ||
+				strings.Contains(strings.ToLower(o.Description), "verification needed") ||
+				strings.Contains(strings.ToLower(o.Description), "human review")) {
 				verification := CheckpointVerification{
 					PlanNumber:     plan.Number,
 					PlanName:       plan.Name,
@@ -569,16 +576,16 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 					AutomatedTest:  o.File,
 				}
 
-				// Parse detail for automated/needs-human breakdown
-				lines := strings.Split(o.Detail, "\n")
+				// Parse description for automated/needs-human breakdown
+				lines := strings.Split(o.Description, "\n")
 				for _, line := range lines {
 					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "Automated aspects:") {
+					if strings.HasPrefix(line, "Automated aspects:") || strings.HasPrefix(line, "Automated:") {
 						verification.WhatAutomated = append(verification.WhatAutomated,
-							strings.TrimSpace(strings.TrimPrefix(line, "Automated aspects:")))
-					} else if strings.HasPrefix(line, "Still needs human review:") {
+							strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "Automated aspects:"), "Automated:")))
+					} else if strings.HasPrefix(line, "Still needs human review:") || strings.HasPrefix(line, "Needs human:") {
 						verification.NeedsHuman = append(verification.NeedsHuman,
-							strings.TrimSpace(strings.TrimPrefix(line, "Still needs human review:")))
+							strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "Still needs human review:"), "Needs human:")))
 					}
 				}
 

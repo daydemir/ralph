@@ -1,12 +1,14 @@
-# Checkpoints Reference
+# Manual Task Patterns
 
-Plans execute autonomously. Checkpoints formalize interaction points where human verification or decisions are needed.
+Plans execute autonomously. Manual tasks formalize interaction points where human verification or decisions are needed.
 
-**Core principle:** Claude automates everything with CLI/API. Checkpoints are for verification and decisions, not manual work.
+**Core principle:** Claude automates everything with CLI/API. Manual tasks are for verification and decisions, not work Claude can automate.
 
-## Checkpoint Types
+## When to Use Manual Tasks
 
-### checkpoint:human-verify (90% of checkpoints)
+Use `type: "manual"` when human input is genuinely required:
+
+### Visual/Functional Verification (most common)
 
 **When:** Claude completed automated work, human confirms it works correctly.
 
@@ -18,17 +20,21 @@ Plans execute autonomously. Checkpoints formalize interaction points where human
 - Animation smoothness
 - Accessibility testing
 
-**Structure in JSON task:**
+**Example:**
 ```json
 {
-  "type": "checkpoint:human-verify",
-  "action": "Verify the responsive dashboard at /dashboard",
-  "verify": "Visit http://localhost:3000/dashboard. Desktop: sidebar visible. Mobile: hamburger menu. No layout shifts.",
-  "done": "User confirms dashboard displays correctly"
+  "id": "verify-1",
+  "name": "Verify responsive dashboard",
+  "type": "manual",
+  "files": [],
+  "action": "Visit http://localhost:3000/dashboard. Desktop: sidebar visible. Mobile: hamburger menu. No layout shifts.",
+  "verify": "User confirms dashboard displays correctly",
+  "done": "Dashboard layout approved",
+  "status": "pending"
 }
 ```
 
-### checkpoint:decision (9% of checkpoints)
+### Implementation Decisions
 
 **When:** Human must make choice that affects implementation direction.
 
@@ -38,20 +44,21 @@ Plans execute autonomously. Checkpoints formalize interaction points where human
 - Design choices (color scheme, layout approach)
 - Feature prioritization
 
-**Structure in JSON task:**
+**Example:**
 ```json
 {
-  "type": "checkpoint:decision",
-  "action": "Select authentication provider",
-  "options": [
-    {"id": "supabase", "name": "Supabase Auth", "pros": "Built-in with DB", "cons": "Less customizable"},
-    {"id": "clerk", "name": "Clerk", "pros": "Best DX", "cons": "Paid after 10k MAU"}
-  ],
-  "done": "Authentication provider selected"
+  "id": "decide-1",
+  "name": "Select authentication provider",
+  "type": "manual",
+  "files": [],
+  "action": "Choose between: (1) Supabase Auth - Built-in with DB, less customizable. (2) Clerk - Best DX, paid after 10k MAU. (3) NextAuth - Free, flexible, more setup.",
+  "verify": "Decision documented in project.json",
+  "done": "Authentication provider selected",
+  "status": "pending"
 }
 ```
 
-### checkpoint:human-action (1% - Rare)
+### External Actions (rare)
 
 **When:** Action has NO CLI/API and requires human-only interaction.
 
@@ -77,24 +84,23 @@ When Claude tries CLI/API and gets auth error, this is NOT a failure - it's a ga
 **In autonomous mode (Ralph):** Authentication gates should be recorded as observations and the task deferred if blocking.
 
 ```xml
-<observation type="auth-gate" severity="high">
+<observation type="blocker">
   <title>Vercel CLI requires authentication</title>
-  <detail>vercel --yes returned "Error: Not authenticated". User needs to run vercel login.</detail>
+  <description>vercel --yes returned "Error: Not authenticated". User needs to run vercel login.</description>
   <file>.vercel/</file>
-  <action>needs-human-verify</action>
 </observation>
 ```
 
-## Checkpoint Handling in Ralph
+## Manual Task Handling in Ralph
 
 **Autonomous Mode (default):**
 - Manual tasks are deferred to phase-end manual plan
-- Record as observation with `type="manual-checkpoint-deferred"`
+- Record as observation with type="finding" noting the deferred task
 - Continue with auto tasks
 - Manual plan runs at phase end with user interaction
 
 **Interactive Mode (manual plans):**
-- Checkpoints pause and await user input
+- Manual tasks pause and await user input
 - User approves or provides feedback
 - Execution continues after input
 
@@ -115,7 +121,7 @@ When Claude tries CLI/API and gets auth error, this is NOT a failure - it's a ga
 
 ## Anti-Patterns
 
-### Bad: Asking human to automate
+### Bad: Asking human to do automatable work
 ```json
 {
   "type": "manual",
@@ -124,33 +130,44 @@ When Claude tries CLI/API and gets auth error, this is NOT a failure - it's a ga
 ```
 **Why bad:** Vercel has a CLI. Should be auto task with `vercel --yes`.
 
-### Bad: Too many checkpoints
+### Bad: Too many manual tasks
 ```json
 {"type": "auto", "name": "Create schema"},
-{"type": "checkpoint:human-verify", "name": "Check schema"},
+{"type": "manual", "name": "Check schema"},
 {"type": "auto", "name": "Create API"},
-{"type": "checkpoint:human-verify", "name": "Check API"}
+{"type": "manual", "name": "Check API"}
 ```
-**Why bad:** Verification fatigue. Combine into one checkpoint at end.
+**Why bad:** Verification fatigue. Combine into one manual task at end.
 
-### Good: Single verification checkpoint
+### Good: Single verification at end
 ```json
 {"type": "auto", "name": "Create schema"},
 {"type": "auto", "name": "Create API"},
 {"type": "auto", "name": "Create UI"},
-{"type": "checkpoint:human-verify", "name": "Verify complete auth flow"}
+{"type": "manual", "name": "Verify complete auth flow"}
 ```
 
-## Writing Good Checkpoints
+## Writing Good Manual Tasks
 
 **DO:**
-- Automate everything with CLI/API before checkpoint
+- Automate everything with CLI/API before manual task
 - Be specific: "Visit https://myapp.vercel.app" not "check deployment"
 - Number verification steps
 - State expected outcomes
+- Use descriptive action field (no separate checkpoint types)
 
 **DON'T:**
 - Ask human to do work Claude can automate
 - Assume knowledge: "Configure the usual settings"
-- Mix multiple verifications in one checkpoint
-- Place checkpoints before automation completes
+- Mix multiple verifications in one task
+- Place manual tasks before automation completes
+- Use checkpoint:* task types (use `type: "manual"` instead)
+
+## Invalid Task Types
+
+These task types are **NOT valid** and will cause validation errors:
+- `checkpoint:human-verify`
+- `checkpoint:human-action`
+- `checkpoint:decision`
+
+All these scenarios should use `type: "manual"` with a descriptive action field that explains what the human needs to do.

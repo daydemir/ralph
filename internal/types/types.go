@@ -349,13 +349,12 @@ type Deviation struct {
 }
 
 // Observation represents a finding captured during execution
+// Simplified: Running agents observe, analyzer infers severity and decides actions
 type Observation struct {
-	Type     string `json:"type"`           // bug, stub, insight, etc.
-	Severity string `json:"severity"`       // critical, high, medium, low, info
-	Title    string `json:"title"`
-	Detail   string `json:"detail"`
-	File     string `json:"file,omitempty"`
-	Action   string `json:"action"`         // needs-fix, needs-plan, none
+	Type        string `json:"type"`                  // blocker, finding, or completion
+	Title       string `json:"title"`                 // Short descriptive title
+	Description string `json:"description,omitempty"` // What was noticed and agent's thoughts
+	File        string `json:"file,omitempty"`        // Where (optional)
 }
 
 // Validate ensures the summary is valid
