@@ -38,10 +38,22 @@ Examples:
 
 		planningDir := gsd.PlanningDir()
 
-		// Load phases
-		phases, err := state.LoadPhases(planningDir)
+		// Load roadmap for phases
+		roadmap, err := state.LoadRoadmapJSON(planningDir)
 		if err != nil {
-			return fmt.Errorf("cannot load phases: %w", err)
+			return fmt.Errorf("cannot load roadmap: %w", err)
+		}
+
+		// Convert roadmap phases to state.Phase for compatibility
+		phases := make([]state.Phase, len(roadmap.Phases))
+		for i, p := range roadmap.Phases {
+			phaseDir := filepath.Join(planningDir, "phases",
+				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			phases[i] = state.Phase{
+				Number: p.Number,
+				Name:   p.Name,
+				Path:   phaseDir,
+			}
 		}
 
 		var targetPlan *state.Plan

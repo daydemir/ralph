@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/daydemir/ralph/internal/planner"
@@ -34,23 +35,32 @@ Progress bars show completion status for each phase.`,
 		}
 
 		planningDir := gsd.PlanningDir()
-		phases, err := state.LoadPhases(planningDir)
+
+		// Load roadmap for project name and phases
+		roadmap, err := state.LoadRoadmapJSON(planningDir)
 		if err != nil {
-			return fmt.Errorf("cannot load phases: %w", err)
+			return fmt.Errorf("cannot load roadmap: %w", err)
 		}
 
-		if len(phases) == 0 {
-			fmt.Println("No phases found in .planning/phases/")
+		if len(roadmap.Phases) == 0 {
+			fmt.Println("No phases found in roadmap")
 			fmt.Println("\nRun 'ralph roadmap' to create your phase breakdown.")
 			return nil
 		}
 
-		// Load roadmap for project name
-		roadmap, err := state.LoadRoadmapJSON(planningDir)
-		projectName := "Project"
-		if err == nil {
-			projectName = roadmap.ProjectName
+		// Convert roadmap phases to state.Phase for display compatibility
+		phases := make([]state.Phase, len(roadmap.Phases))
+		for i, p := range roadmap.Phases {
+			phaseDir := filepath.Join(planningDir, "phases",
+				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			phases[i] = state.Phase{
+				Number: p.Number,
+				Name:   p.Name,
+				Path:   phaseDir,
+			}
 		}
+
+		projectName := roadmap.ProjectName
 
 		green := color.New(color.FgGreen).SprintFunc()
 		yellow := color.New(color.FgYellow).SprintFunc()

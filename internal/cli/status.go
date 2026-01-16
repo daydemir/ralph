@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/fatih/color"
@@ -67,17 +68,39 @@ Use --verbose for detailed information including decisions and issues.`,
 			return fmt.Errorf("cannot load roadmap: %w", err)
 		}
 
-		// Load phases
-		phases, err := state.LoadPhases(planningDir)
-		if err != nil {
-			phases = []state.Phase{}
+		// Convert roadmap phases to state.Phase for display compatibility
+		// This conversion is temporary until status.go is fully migrated in a future plan
+		phases := make([]state.Phase, len(roadmap.Phases))
+		for i, p := range roadmap.Phases {
+			phaseDir := filepath.Join(planningDir, "phases",
+				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			phases[i] = state.Phase{
+				Number: p.Number,
+				Name:   p.Name,
+				Path:   phaseDir,
+			}
+			// Plans field would need to be populated if used
 		}
 
-		// Count plans
-		total, completed := state.CountPlans(phases)
+		// Count total plans from roadmap
+		total := 0
+		for _, p := range roadmap.Phases {
+			total += len(p.Plans)
+		}
 
-		// Find next plan
-		nextPhase, nextPlan := state.FindNextPlan(phases)
+		// Count completed plans (simplified for now - will be improved in 02-03)
+		completed := 0
+		// TODO(02-03): Add proper completed count using JSON plan status
+
+		// Find next plan using JSON roadmap
+		nextPhaseData, nextPlanData, _ := state.FindNextPlanJSON(planningDir)
+
+		// Convert to display-compatible structures if found
+		var nextPhase *state.Phase
+		var nextPlan *state.Plan
+		if nextPhaseData != nil && nextPlanData != nil {
+			nextPhase, nextPlan = executor.ConvertToExecutionStructs(planningDir, nextPhaseData, nextPlanData)
+		}
 
 		// Display status
 		cyan := color.New(color.FgCyan).SprintFunc()

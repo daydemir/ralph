@@ -272,9 +272,22 @@ func ParseSummaryObservations(content string) []Observation {
 func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *state.Plan) []string {
 	var subsequent []string
 
-	phases, err := state.LoadPhases(e.config.PlanningDir)
+	roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
 	if err != nil {
 		return subsequent
+	}
+
+	// Convert roadmap phases to state.Phase for compatibility
+	phases := make([]state.Phase, len(roadmap.Phases))
+	for i, p := range roadmap.Phases {
+		phaseDir := filepath.Join(e.config.PlanningDir, "phases",
+			fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+		phases[i] = state.Phase{
+			Number: p.Number,
+			Name:   p.Name,
+			Path:   phaseDir,
+		}
+		// Note: Plans field is not populated - would need LoadAllPlansJSON if used
 	}
 
 	foundCurrent := false
