@@ -119,9 +119,13 @@ func FindNextPlanJSON(planningDir string) (*types.Phase, *types.Plan, error) {
 	for i := range roadmap.Phases {
 		phase := &roadmap.Phases[i]
 
-		// Load all plans for this phase
-		phaseDir := filepath.Join(planningDir, "phases",
-			fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+		// Find phase directory by number prefix (handles name mismatches)
+		phaseDir := FindPhaseDirByNumber(planningDir, phase.Number)
+		if phaseDir == "" {
+			// Fall back to slugified name if no directory found
+			phaseDir = filepath.Join(planningDir, "phases",
+				fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+		}
 
 		plans, err := LoadAllPlansJSON(phaseDir)
 		if err != nil {
@@ -158,4 +162,25 @@ func slugify(name string) string {
 		}
 	}
 	return result
+}
+
+// FindPhaseDirByNumber finds a phase directory by its number prefix
+// Looks for directories matching "NN-*" pattern in .planning/phases/
+// Returns the full path to the phase directory, or empty string if not found
+func FindPhaseDirByNumber(planningDir string, phaseNumber int) string {
+	phasesDir := filepath.Join(planningDir, "phases")
+	prefix := fmt.Sprintf("%02d-", phaseNumber)
+
+	entries, err := os.ReadDir(phasesDir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
+			return filepath.Join(phasesDir, entry.Name())
+		}
+	}
+
+	return ""
 }

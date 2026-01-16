@@ -51,12 +51,35 @@ Progress bars show completion status for each phase.`,
 		// Convert roadmap phases to state.Phase for display compatibility
 		phases := make([]state.Phase, len(roadmap.Phases))
 		for i, p := range roadmap.Phases {
-			phaseDir := filepath.Join(planningDir, "phases",
-				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			// Find phase directory by number prefix (handles name mismatches)
+			phaseDir := state.FindPhaseDirByNumber(planningDir, p.Number)
+			if phaseDir == "" {
+				// Fall back to slugified name if no directory found
+				phaseDir = filepath.Join(planningDir, "phases",
+					fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			}
 			phases[i] = state.Phase{
 				Number: p.Number,
 				Name:   p.Name,
 				Path:   phaseDir,
+			}
+
+			// Load JSON plans from phase directory
+			jsonPlans, err := state.LoadAllPlansJSON(phaseDir)
+			if err == nil {
+				// Convert types.Plan to state.Plan for display
+				for _, jp := range jsonPlans {
+					summaryPath := filepath.Join(phaseDir,
+						fmt.Sprintf("%02d-%s-SUMMARY.md", p.Number, jp.PlanNumber))
+					_, summaryExists := os.Stat(summaryPath)
+					phases[i].Plans = append(phases[i].Plans, state.Plan{
+						Number:      jp.PlanNumber,
+						Name:        jp.Objective,
+						Path:        filepath.Join(phaseDir, fmt.Sprintf("%02d-%s.json", p.Number, jp.PlanNumber)),
+						Status:      string(jp.Status),
+						IsCompleted: jp.Status == "complete" || summaryExists == nil,
+					})
+				}
 			}
 		}
 

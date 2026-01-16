@@ -69,28 +69,46 @@ Use --verbose for detailed information including decisions and issues.`,
 		}
 
 		// Convert roadmap phases to state.Phase for display compatibility
-		// This conversion is temporary until status.go is fully migrated in a future plan
 		phases := make([]state.Phase, len(roadmap.Phases))
+		total := 0
+		completed := 0
 		for i, p := range roadmap.Phases {
-			phaseDir := filepath.Join(planningDir, "phases",
-				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			// Find phase directory by number prefix (handles name mismatches)
+			phaseDir := state.FindPhaseDirByNumber(planningDir, p.Number)
+			if phaseDir == "" {
+				// Fall back to slugified name if no directory found
+				phaseDir = filepath.Join(planningDir, "phases",
+					fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			}
 			phases[i] = state.Phase{
 				Number: p.Number,
 				Name:   p.Name,
 				Path:   phaseDir,
 			}
-			// Plans field would need to be populated if used
-		}
 
-		// Count total plans from roadmap
-		total := 0
-		for _, p := range roadmap.Phases {
-			total += len(p.Plans)
+			// Load JSON plans from phase directory
+			jsonPlans, err := state.LoadAllPlansJSON(phaseDir)
+			if err == nil {
+				total += len(jsonPlans)
+				// Convert types.Plan to state.Plan for display
+				for _, jp := range jsonPlans {
+					summaryPath := filepath.Join(phaseDir,
+						fmt.Sprintf("%02d-%s-SUMMARY.md", p.Number, jp.PlanNumber))
+					_, summaryExists := os.Stat(summaryPath)
+					isComplete := jp.Status == "complete" || summaryExists == nil
+					if isComplete {
+						completed++
+					}
+					phases[i].Plans = append(phases[i].Plans, state.Plan{
+						Number:      jp.PlanNumber,
+						Name:        jp.Objective,
+						Path:        filepath.Join(phaseDir, fmt.Sprintf("%02d-%s.json", p.Number, jp.PlanNumber)),
+						Status:      string(jp.Status),
+						IsCompleted: isComplete,
+					})
+				}
+			}
 		}
-
-		// Count completed plans (simplified for now - will be improved in 02-03)
-		completed := 0
-		// TODO(02-03): Add proper completed count using JSON plan status
 
 		// Find next plan using JSON roadmap
 		nextPhaseData, nextPlanData, _ := state.FindNextPlanJSON(planningDir)
