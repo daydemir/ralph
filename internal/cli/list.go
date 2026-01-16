@@ -45,11 +45,11 @@ Progress bars show completion status for each phase.`,
 			return nil
 		}
 
-		// Load project name from state
-		st, _ := state.LoadState(planningDir)
+		// Load roadmap for project name
+		roadmap, err := state.LoadRoadmapJSON(planningDir)
 		projectName := "Project"
-		if st != nil && st.ProjectName != "" {
-			projectName = st.ProjectName
+		if err == nil {
+			projectName = roadmap.ProjectName
 		}
 
 		green := color.New(color.FgGreen).SprintFunc()
