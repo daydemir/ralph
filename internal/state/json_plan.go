@@ -29,9 +29,11 @@ func LoadPlanJSON(planPath string) (*types.Plan, error) {
 		return nil, fmt.Errorf("cannot decode plan JSON: %w", err)
 	}
 
-	// Validate the loaded plan (includes task type validation)
-	if err := plan.Validate(); err != nil {
-		return nil, fmt.Errorf("plan validation failed: %w", err)
+	// Validate the loaded plan using detailed validation
+	// This returns structured errors that can be used for self-healing
+	validationErrs := plan.ValidateWithDetails()
+	if validationErrs.HasErrors() {
+		return nil, validationErrs
 	}
 
 	return &plan, nil

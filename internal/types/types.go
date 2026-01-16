@@ -104,6 +104,72 @@ func (p *Plan) Validate() error {
 	return nil
 }
 
+// ValidateWithDetails performs detailed validation and returns structured errors
+// This is used by the self-healing validation loop to provide precise error information
+func (p *Plan) ValidateWithDetails() *ValidationErrors {
+	errs := &ValidationErrors{}
+
+	if p.Phase == "" {
+		errs.Add(
+			"phase",
+			"non-empty string",
+			"",
+			"Provide phase ID like \"01-critical-bug-fixes\"",
+		)
+	}
+	if p.PlanNumber == "" {
+		errs.Add(
+			"plan_number",
+			"non-empty string",
+			"",
+			"Provide plan number like \"01\" or \"01.1\"",
+		)
+	}
+	if p.Status == "" {
+		p.Status = StatusPending // Default to pending
+	}
+	if !p.Status.IsValid() {
+		errs.Add(
+			"status",
+			fmt.Sprintf("one of: %v", AllStatuses()),
+			p.Status,
+			fmt.Sprintf("Change status to one of the valid values (not %q)", p.Status),
+		)
+	}
+	if p.Objective == "" {
+		errs.Add(
+			"objective",
+			"non-empty string",
+			"",
+			"Provide plan objective describing what this plan accomplishes",
+		)
+	}
+	if len(p.Tasks) == 0 {
+		errs.Add(
+			"tasks",
+			"array with at least one task",
+			[]string{},
+			"Add at least one task to the plan",
+		)
+	}
+	for i, task := range p.Tasks {
+		taskErrs := task.ValidateWithDetails(fmt.Sprintf("tasks[%d]", i))
+		if taskErrs.HasErrors() {
+			errs.Errors = append(errs.Errors, taskErrs.Errors...)
+		}
+	}
+	if p.CreatedAt.IsZero() {
+		errs.Add(
+			"created_at",
+			"ISO 8601 timestamp",
+			nil,
+			"Provide created_at timestamp in ISO 8601 format",
+		)
+	}
+
+	return errs
+}
+
 // Task represents a task within a plan
 type Task struct {
 	ID          string     `json:"id"`                     // Task ID like "task-1"
@@ -141,6 +207,61 @@ func (t *Task) Validate() error {
 		return fmt.Errorf("task.status: invalid value %q, must be one of: %v", t.Status, AllStatuses())
 	}
 	return nil
+}
+
+// ValidateWithDetails performs detailed validation and returns structured errors
+// This is used by the self-healing validation loop to provide precise error information
+func (t *Task) ValidateWithDetails(fieldPrefix string) *ValidationErrors {
+	errs := &ValidationErrors{}
+
+	if t.ID == "" {
+		errs.Add(
+			fieldPrefix+".id",
+			"non-empty string",
+			"",
+			"Provide a task ID like \"task-1\"",
+		)
+	}
+	if t.Name == "" {
+		errs.Add(
+			fieldPrefix+".name",
+			"non-empty string",
+			"",
+			"Provide a descriptive task name",
+		)
+	}
+	if t.Type == "" {
+		t.Type = TaskTypeAuto // Default to auto
+	}
+	if !t.Type.IsValid() {
+		errs.Add(
+			fieldPrefix+".type",
+			fmt.Sprintf("one of: %v", AllTaskTypes()),
+			t.Type,
+			fmt.Sprintf("Change task type to \"auto\" or \"manual\" (not %q)", t.Type),
+		)
+	}
+	if t.Action == "" {
+		errs.Add(
+			fieldPrefix+".action",
+			"non-empty string",
+			"",
+			"Provide task action describing what to do",
+		)
+	}
+	if t.Status == "" {
+		t.Status = StatusPending // Default to pending
+	}
+	if !t.Status.IsValid() {
+		errs.Add(
+			fieldPrefix+".status",
+			fmt.Sprintf("one of: %v", AllStatuses()),
+			t.Status,
+			fmt.Sprintf("Change status to one of the valid values (not %q)", t.Status),
+		)
+	}
+
+	return errs
 }
 
 // ProjectState represents runtime state tracking (state.json)
