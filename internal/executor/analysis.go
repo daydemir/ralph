@@ -50,7 +50,7 @@ type AnalysisResult struct {
 }
 
 // RunPostAnalysis spawns an agent to analyze observations and potentially update subsequent plans
-func (e *Executor) RunPostAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, skipAnalysis bool) *AnalysisResult {
+func (e *Executor) RunPostAnalysis(ctx context.Context, phase *types.Phase, plan *types.Plan, skipAnalysis bool) *AnalysisResult {
 	result := &AnalysisResult{}
 
 	if skipAnalysis {
@@ -280,7 +280,7 @@ func ParseSummaryObservations(content string) []Observation {
 }
 
 // findSubsequentPlans returns paths to plans that come after the current one
-func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *state.Plan) []string {
+func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *types.Plan) []string {
 	var subsequent []string
 
 	roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
@@ -288,28 +288,25 @@ func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *s
 		return subsequent
 	}
 
-	// Convert roadmap phases to state.Phase for compatibility
-	phases := make([]state.Phase, len(roadmap.Phases))
-	for i, p := range roadmap.Phases {
+	foundCurrent := false
+	for _, p := range roadmap.Phases {
 		phaseDir := filepath.Join(e.config.PlanningDir, "phases",
 			fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
-		phases[i] = state.Phase{
-			Number: p.Number,
-			Name:   p.Name,
-			Path:   phaseDir,
-		}
-		// Note: Plans field is not populated - would need LoadAllPlansJSON if used
-	}
 
-	foundCurrent := false
-	for _, phase := range phases {
-		for _, plan := range phase.Plans {
-			if plan.Path == currentPlan.Path {
+		// Load all plans for this phase from disk
+		plans, err := state.LoadAllPlansJSON(phaseDir)
+		if err != nil {
+			continue
+		}
+
+		for _, plan := range plans {
+			planPath := filepath.Join(phaseDir, fmt.Sprintf("%02d-%s.json", p.Number, plan.PlanNumber))
+			if planPath == currentPlan.Path {
 				foundCurrent = true
 				continue
 			}
-			if foundCurrent && !plan.IsCompleted {
-				subsequent = append(subsequent, plan.Path)
+			if foundCurrent && plan.Status != types.StatusComplete {
+				subsequent = append(subsequent, planPath)
 			}
 		}
 	}
@@ -318,7 +315,7 @@ func (e *Executor) findSubsequentPlans(currentPhase *state.Phase, currentPlan *s
 }
 
 // buildAnalysisPrompt creates the prompt for the post-run analysis agent
-func (e *Executor) buildAnalysisPrompt(plan *state.Plan, observations []Observation, subsequentPlans []string) string {
+func (e *Executor) buildAnalysisPrompt(plan *types.Plan, observations []Observation, subsequentPlans []string) string {
 	var observationsText strings.Builder
 	for i, o := range observations {
 		observationsText.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, o.Type, o.Title))
@@ -548,19 +545,28 @@ type CheckpointVerification struct {
 
 // CollectCheckpointObservations scans all completed plans in a phase for observations that need human verification
 // Now looks for "finding" observations with descriptions mentioning verification needed
-func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []CheckpointVerification {
+func (e *Executor) CollectCheckpointObservations(phase *types.Phase) []CheckpointVerification {
 	var verifications []CheckpointVerification
 
-	for _, plan := range phase.Plans {
-		// Only check completed plans (have summary.json)
-		if !plan.IsCompleted {
+	// Load all plans for this phase from disk
+	plans, err := state.LoadAllPlansJSON(phase.Path)
+	if err != nil {
+		return verifications
+	}
+
+	for _, plan := range plans {
+		// Only check completed plans
+		if plan.Status != types.StatusComplete {
 			continue
 		}
 
-		content, err := os.ReadFile(plan.Path)
+		planPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-%s.json", phase.Number, plan.PlanNumber))
+		content, err := os.ReadFile(planPath)
 		if err != nil {
 			continue
 		}
+
+		planName := extractPlanName(plan.Objective)
 
 		observations := ParseObservations(string(content), nil)
 		for _, o := range observations {
@@ -569,9 +575,9 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 				strings.Contains(strings.ToLower(o.Description), "verification needed") ||
 				strings.Contains(strings.ToLower(o.Description), "human review")) {
 				verification := CheckpointVerification{
-					PlanNumber:     plan.Number,
-					PlanName:       plan.Name,
-					PlanPath:       plan.Path,
+					PlanNumber:     plan.PlanNumber,
+					PlanName:       planName,
+					PlanPath:       planPath,
 					CheckpointName: o.Title,
 					AutomatedTest:  o.File,
 				}
@@ -599,14 +605,20 @@ func (e *Executor) CollectCheckpointObservations(phase *state.Phase) []Checkpoin
 
 // IsPhaseComplete checks if all regular plans in the phase are completed
 // (excluding decision and verification plans)
-func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
-	for _, plan := range phase.Plans {
+func (e *Executor) IsPhaseComplete(phase *types.Phase) bool {
+	// Load all plans for this phase from disk
+	plans, err := state.LoadAllPlansJSON(phase.Path)
+	if err != nil {
+		return false
+	}
+
+	for _, plan := range plans {
 		// Skip special plans (decisions and verification)
-		num, _ := strconv.ParseFloat(plan.Number, 64)
+		num, _ := strconv.ParseFloat(plan.PlanNumber, 64)
 		if num == 0 || num >= 99 {
 			continue
 		}
-		if !plan.IsCompleted {
+		if plan.Status != types.StatusComplete {
 			return false
 		}
 	}
@@ -614,7 +626,7 @@ func (e *Executor) IsPhaseComplete(phase *state.Phase) bool {
 }
 
 // MaybeCreateVerificationPlan checks if phase is complete and creates bundled verification plan
-func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error) {
+func (e *Executor) MaybeCreateVerificationPlan(phase *types.Phase) (bool, error) {
 	// Check if verification plan already exists
 	verificationPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99.json", phase.Number))
 	if _, err := os.Stat(verificationPath); err == nil {
@@ -649,7 +661,7 @@ func (e *Executor) MaybeCreateVerificationPlan(phase *state.Phase) (bool, error)
 }
 
 // createVerificationPlan generates the bundled verification plan file in JSON format
-func (e *Executor) createVerificationPlan(phase *state.Phase, verifications []CheckpointVerification, outPath string) error {
+func (e *Executor) createVerificationPlan(phase *types.Phase, verifications []CheckpointVerification, outPath string) error {
 	// Build tasks from checkpoint verifications
 	var tasks []types.Task
 	for i, v := range verifications {
@@ -776,7 +788,7 @@ Begin investigation now.`, blockerClaim, planPath)
 }
 
 // RunBlockerAnalysis verifies whether a blocker claim is legitimate
-func (e *Executor) RunBlockerAnalysis(ctx context.Context, failure *llm.FailureSignal, plan *state.Plan) *BlockerAnalysisResult {
+func (e *Executor) RunBlockerAnalysis(ctx context.Context, failure *llm.FailureSignal, plan *types.Plan) *BlockerAnalysisResult {
 	result := &BlockerAnalysisResult{}
 
 	e.display.Info("Blocker Analysis", fmt.Sprintf("Verifying blocker claim: %s", failure.Detail))
@@ -863,7 +875,7 @@ func (h *blockerAnalysisHandler) OnDone(result string) {
 }
 
 // DecideRecovery analyzes execution failure context and decides how to proceed
-func (e *Executor) DecideRecovery(ctx context.Context, execCtx ExecutionContext, plan *state.Plan) (*RecoveryAction, error) {
+func (e *Executor) DecideRecovery(ctx context.Context, execCtx ExecutionContext, plan *types.Plan) (*RecoveryAction, error) {
 	e.display.Info("Recovery Analysis", "Analyzing execution failure context")
 
 	// Build prompt with error context + logs from multiple sources
@@ -909,7 +921,7 @@ func (e *Executor) DecideRecovery(ctx context.Context, execCtx ExecutionContext,
 }
 
 // buildRecoveryPrompt creates the prompt for recovery decision analysis
-func buildRecoveryPrompt(execCtx ExecutionContext, plan *state.Plan) string {
+func buildRecoveryPrompt(execCtx ExecutionContext, plan *types.Plan) string {
 	// Join captured logs with newlines
 	logsText := strings.Join(execCtx.CapturedLogs, "\n")
 

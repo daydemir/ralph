@@ -9,6 +9,7 @@ import (
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
+	"github.com/daydemir/ralph/internal/types"
 	"github.com/spf13/cobra"
 )
 
@@ -44,20 +45,8 @@ Examples:
 			return fmt.Errorf("cannot load roadmap: %w", err)
 		}
 
-		// Convert roadmap phases to state.Phase for compatibility
-		phases := make([]state.Phase, len(roadmap.Phases))
-		for i, p := range roadmap.Phases {
-			phaseDir := filepath.Join(planningDir, "phases",
-				fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
-			phases[i] = state.Phase{
-				Number: p.Number,
-				Name:   p.Name,
-				Path:   phaseDir,
-			}
-		}
-
-		var targetPlan *state.Plan
-		var targetPhase *state.Phase
+		var targetPlan *types.Plan
+		var targetPhase *types.Phase
 
 		if len(args) > 0 {
 			// Find the specified plan
@@ -66,11 +55,21 @@ Examples:
 				planPath = filepath.Join(cwd, planPath)
 			}
 
-			for i := range phases {
-				for j := range phases[i].Plans {
-					if phases[i].Plans[j].Path == planPath {
-						targetPlan = &phases[i].Plans[j]
-						targetPhase = &phases[i]
+			// Search through phases to find the plan
+			for _, phase := range roadmap.Phases {
+				phaseDir := filepath.Join(planningDir, "phases",
+					fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+
+				plans, err := state.LoadAllPlansJSON(phaseDir)
+				if err != nil {
+					continue
+				}
+
+				for i := range plans {
+					pPath := filepath.Join(phaseDir, fmt.Sprintf("%02d-%s.json", phase.Number, plans[i].PlanNumber))
+					if pPath == planPath {
+						// Use ConvertToExecutionStructs to populate runtime fields
+						targetPhase, targetPlan = executor.ConvertToExecutionStructs(planningDir, &phase, &plans[i])
 						break
 					}
 				}
@@ -84,11 +83,20 @@ Examples:
 			}
 		} else {
 			// Find most recently completed plan
-			for i := len(phases) - 1; i >= 0; i-- {
-				for j := len(phases[i].Plans) - 1; j >= 0; j-- {
-					if phases[i].Plans[j].IsCompleted {
-						targetPlan = &phases[i].Plans[j]
-						targetPhase = &phases[i]
+			for i := len(roadmap.Phases) - 1; i >= 0; i-- {
+				phase := roadmap.Phases[i]
+				phaseDir := filepath.Join(planningDir, "phases",
+					fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+
+				plans, err := state.LoadAllPlansJSON(phaseDir)
+				if err != nil {
+					continue
+				}
+
+				for j := len(plans) - 1; j >= 0; j-- {
+					if plans[j].Status == types.StatusComplete {
+						// Use ConvertToExecutionStructs to populate runtime fields
+						targetPhase, targetPlan = executor.ConvertToExecutionStructs(planningDir, &phase, &plans[j])
 						break
 					}
 				}

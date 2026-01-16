@@ -39,6 +39,10 @@ type Phase struct {
 	Goal   string   `json:"goal"`   // Phase goal
 	Status Status   `json:"status"` // Uses unified Status enum
 	Plans  []string `json:"plans"`  // Plan IDs like "01-01", "01-02"
+
+	// Runtime fields (not serialized to JSON)
+	Path        string `json:"-"` // Filesystem path to phase directory
+	IsCompleted bool   `json:"-"` // Whether all plans in phase are complete
 }
 
 // Validate ensures the phase is valid
@@ -63,14 +67,43 @@ func (p *Phase) Validate() error {
 
 // Plan represents an individual plan (NN-MM.json)
 type Plan struct {
-	Phase        string     `json:"phase"`                  // Phase ID like "01-critical-bug-fixes"
-	PlanNumber   string     `json:"plan_number"`            // Plan number like "01" (supports decimals like "01.1")
-	Status       Status     `json:"status"`                 // Uses unified Status enum
-	Objective    string     `json:"objective"`              // Plan objective
-	Tasks        []Task     `json:"tasks"`                  // List of tasks
-	Verification []string   `json:"verification"`           // Verification commands
-	CreatedAt    time.Time  `json:"created_at"`             // When plan was created
-	CompletedAt  *time.Time `json:"completed_at,omitempty"` // When plan was completed (optional)
+	Phase              string     `json:"phase"`                         // Phase ID like "01-critical-bug-fixes"
+	PlanNumber         string     `json:"plan_number"`                   // Plan number like "01" (supports decimals like "01.1")
+	Status             Status     `json:"status"`                        // Uses unified Status enum
+	Objective          string     `json:"objective"`                     // Plan objective
+	Tasks              []Task     `json:"tasks"`                         // List of tasks
+	Verification       []string   `json:"verification"`                  // Verification commands
+	ValidationCommands []string   `json:"validation_commands,omitempty"` // Commands that MUST pass before plan can be marked complete
+	CreatedAt          time.Time  `json:"created_at"`                    // When plan was created
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`        // When plan was completed (optional)
+
+	// Runtime fields (not serialized to JSON)
+	Path        string `json:"-"` // Filesystem path to plan JSON file
+	Name        string `json:"-"` // Derived from objective (first sentence or 80 chars)
+	IsCompleted bool   `json:"-"` // Status == StatusComplete
+}
+
+// PlanType constants for categorizing plans
+const (
+	PlanTypeExecute   = "execute"
+	PlanTypeManual    = "manual"
+	PlanTypeDecisions = "decisions"
+)
+
+// GetType returns the plan type based on tasks
+// If any task is manual, the plan is manual; otherwise execute
+func (p *Plan) GetType() string {
+	for _, task := range p.Tasks {
+		if task.Type == TaskTypeManual {
+			return PlanTypeManual
+		}
+	}
+	return PlanTypeExecute
+}
+
+// IsManual returns true if the plan contains any manual tasks
+func (p *Plan) IsManual() bool {
+	return p.GetType() == PlanTypeManual
 }
 
 // Validate ensures the plan is valid
@@ -200,6 +233,14 @@ func (t *Task) Validate() error {
 	if t.Action == "" {
 		return fmt.Errorf("task.action: field is required")
 	}
+	// Done is required for all tasks
+	if t.Done == "" {
+		return fmt.Errorf("task.done: field is required")
+	}
+	// Verify is required for auto tasks (manual tasks may not have automated verification)
+	if t.Type == TaskTypeAuto && t.Verify == "" {
+		return fmt.Errorf("task.verify: field is required for auto tasks")
+	}
 	if t.Status == "" {
 		t.Status = StatusPending // Default to pending
 	}
@@ -247,6 +288,24 @@ func (t *Task) ValidateWithDetails(fieldPrefix string) *ValidationErrors {
 			"non-empty string",
 			"",
 			"Provide task action describing what to do",
+		)
+	}
+	// Done is required for all tasks
+	if t.Done == "" {
+		errs.Add(
+			fieldPrefix+".done",
+			"non-empty string",
+			"",
+			"Provide acceptance criteria describing when this task is complete",
+		)
+	}
+	// Verify is required for auto tasks (manual tasks may not have automated verification)
+	if t.Type == TaskTypeAuto && t.Verify == "" {
+		errs.Add(
+			fieldPrefix+".verify",
+			"non-empty string (required for auto tasks)",
+			"",
+			"Provide verification command or criteria for auto task",
 		)
 	}
 	if t.Status == "" {

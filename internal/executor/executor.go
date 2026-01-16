@@ -87,7 +87,7 @@ type RunResult struct {
 }
 
 // ExecutePlan runs a single plan and returns the result
-func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *state.Plan) *RunResult {
+func (e *Executor) ExecutePlan(ctx context.Context, phase *types.Phase, plan *types.Plan) *RunResult {
 	start := time.Now()
 	result := &RunResult{
 		PlanPath: plan.Path,
@@ -115,7 +115,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 	// Show execution start in a Ralph box
 	e.display.RalphBox("RALPH",
 		fmt.Sprintf("Executing: %s", plan.Name),
-		fmt.Sprintf("Phase %d, Plan %s", phase.Number, plan.Number))
+		fmt.Sprintf("Phase %d, Plan %s", phase.Number, plan.PlanNumber))
 
 	// Show Claude execution start
 	e.display.ClaudeStart()
@@ -272,7 +272,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 			}
 
 			// Commit and push all repos
-			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
+			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
 			e.CommitAndPushRepos(planId)
 		}
 	} else if handler.IsBailout() {
@@ -320,7 +320,7 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *state.Phase, plan *st
 }
 
 // ExecuteManualPlanInteractive opens an interactive Claude session for manual tasks
-func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *state.Phase, plan *state.Plan, start time.Time) *RunResult {
+func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *types.Phase, plan *types.Plan, start time.Time) *RunResult {
 	result := &RunResult{
 		PlanPath: plan.Path,
 	}
@@ -372,7 +372,7 @@ Begin by reading the plan and presenting the first task.`, executorPrompt, plan.
 			}
 
 			// Commit and push all repos
-			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.Number)
+			planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
 			e.CommitAndPushRepos(planId)
 		} else {
 			result.FailureType = FailureSoft
@@ -1003,7 +1003,7 @@ type SoftFailureAnalysisResult struct {
 }
 
 // runSoftFailureAnalysis evaluates what happened during a soft failure and decides how to proceed
-func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *state.Phase, plan *state.Plan, result *RunResult) *SoftFailureAnalysisResult {
+func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *types.Phase, plan *types.Plan, result *RunResult) *SoftFailureAnalysisResult {
 	// Check if summary.json exists → likely complete
 	summaryPath := strings.Replace(plan.Path, ".json", "-summary.json", 1)
 	if _, err := os.Stat(summaryPath); err == nil {
@@ -1040,18 +1040,10 @@ func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *state.Phas
 	}
 }
 
-// RunPhaseStartAnalysis runs phase-start analysis to bundle decisions and manual tasks
-func (e *Executor) RunPhaseStartAnalysis(phase *state.Phase) error {
-	// Create decisions plan (runs FIRST - plan 00)
-	created, err := e.MaybeCreateDecisionsPlan(phase)
-	if err != nil {
-		e.display.Warning(fmt.Sprintf("Failed to create decisions plan: %v", err))
-	} else if created {
-		e.display.Info("Phase Start", "Created decisions plan (runs first)")
-	}
-
+// RunPhaseStartAnalysis runs phase-start analysis to bundle manual tasks
+func (e *Executor) RunPhaseStartAnalysis(phase *types.Phase) error {
 	// Create manual tasks plan (runs LAST - plan 99)
-	created, err = e.MaybeCreateManualTasksPlan(phase)
+	created, err := e.MaybeCreateManualTasksPlan(phase)
 	if err != nil {
 		e.display.Warning(fmt.Sprintf("Failed to create manual tasks plan: %v", err))
 	} else if created {
@@ -1135,59 +1127,6 @@ func resolveBinaryPath(name string) string {
 	return name
 }
 
-// DecisionCheckpoint represents a checkpoint:decision extracted from a plan
-type DecisionCheckpoint struct {
-	PlanNumber  string // String to support decimal plan numbers like "5.1"
-	PlanName    string
-	PlanPath    string
-	TaskContent string
-	Context     string
-}
-
-// MaybeCreateDecisionsPlan is deprecated - checkpoint:decision no longer exists
-// All decision scenarios should now use type="manual" with descriptive action field
-func (e *Executor) MaybeCreateDecisionsPlan(phase *state.Phase) (bool, error) {
-	// No-op: checkpoint:decision type has been removed
-	// Decision tasks are now just manual tasks with descriptive action fields
-	return false, nil
-}
-
-// createDecisionsPlan generates the bundled decisions plan file in JSON format
-func (e *Executor) createDecisionsPlan(phase *state.Phase, decisions []DecisionCheckpoint, outPath string) error {
-	// Build tasks from decision checkpoints
-	var tasks []types.Task
-	for i, d := range decisions {
-		tasks = append(tasks, types.Task{
-			ID:     fmt.Sprintf("decision-%d", i+1),
-			Name:   fmt.Sprintf("Decision from Plan %s", d.PlanName),
-			Type:   types.TaskTypeManual, // Decisions require human input
-			Files:  []string{d.PlanPath},
-			Action: d.TaskContent,
-			Done:   "Decision made and recorded",
-			Status: types.StatusPending,
-		})
-	}
-
-	// Build verification items
-	verification := []string{
-		"All decisions have been made",
-		"Each decision is recorded in state.json",
-		"Decision rationales are documented",
-	}
-
-	plan := &types.Plan{
-		Phase:        fmt.Sprintf("%02d-%s", phase.Number, phase.Name),
-		PlanNumber:   "00",
-		Status:       types.StatusPending,
-		Objective:    fmt.Sprintf("Make all architectural and approach decisions before executing Phase %d plans", phase.Number),
-		Tasks:        tasks,
-		Verification: verification,
-		CreatedAt:    time.Now(),
-	}
-
-	return state.SavePlanJSON(outPath, plan)
-}
-
 // ManualTask represents a manual task extracted from a plan
 type ManualTask struct {
 	PlanNumber  string
@@ -1198,7 +1137,7 @@ type ManualTask struct {
 }
 
 // MaybeCreateManualTasksPlan scans a phase for manual tasks and creates a bundled manual tasks plan
-func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) {
+func (e *Executor) MaybeCreateManualTasksPlan(phase *types.Phase) (bool, error) {
 	// Check if manual tasks plan already exists
 	manualPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-99.json", phase.Number))
 	if _, err := os.Stat(manualPath); err == nil {
@@ -1206,16 +1145,26 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 		return false, nil
 	}
 
+	// Load all plans for this phase from disk
+	plans, err := state.LoadAllPlansJSON(phase.Path)
+	if err != nil {
+		return false, fmt.Errorf("failed to load plans for phase: %w", err)
+	}
+
 	// Scan all plans in this phase for manual tasks
 	var manualTasks []ManualTask
 	// Match task with type attribute for extraction
 	taskWithTypePattern := regexp.MustCompile(`(?s)(<task\s+[^>]*>)(.*?)(</task>)`)
 
-	for _, plan := range phase.Plans {
-		content, err := os.ReadFile(plan.Path)
+	for _, plan := range plans {
+		// Build plan path
+		planPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-%s.json", phase.Number, plan.PlanNumber))
+		content, err := os.ReadFile(planPath)
 		if err != nil {
 			continue
 		}
+
+		planName := extractPlanName(plan.Objective)
 
 		// Find all tasks and check their types
 		matches := taskWithTypePattern.FindAllStringSubmatch(string(content), -1)
@@ -1228,16 +1177,16 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 				taskType, err := ExtractTaskType(taskOpenTag)
 				if err != nil {
 					// Log invalid task type but continue
-					e.display.Warning(fmt.Sprintf("Invalid task type in %s: %v", plan.Name, err))
+					e.display.Warning(fmt.Sprintf("Invalid task type in %s: %v", planName, err))
 					continue
 				}
 
 				// Only bundle manual tasks
 				if RequiresHumanAction(taskType) {
 					manualTasks = append(manualTasks, ManualTask{
-						PlanNumber:  plan.Number,
-						PlanName:    plan.Name,
-						PlanPath:    plan.Path,
+						PlanNumber:  plan.PlanNumber,
+						PlanName:    planName,
+						PlanPath:    planPath,
 						TaskName:    fmt.Sprintf("Manual Task %d", i+1),
 						TaskContent: strings.TrimSpace(taskContent),
 					})
@@ -1254,7 +1203,7 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 	e.display.Info("Manual Tasks", fmt.Sprintf("Found %d manual tasks, creating plan...", len(manualTasks)))
 
 	// Create the manual tasks plan
-	err := e.createManualTasksPlan(phase, manualTasks, manualPath)
+	err = e.createManualTasksPlan(phase, manualTasks, manualPath)
 	if err != nil {
 		return false, err
 	}
@@ -1265,7 +1214,7 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *state.Phase) (bool, error) 
 }
 
 // createManualTasksPlan generates the bundled manual tasks plan file in JSON format
-func (e *Executor) createManualTasksPlan(phase *state.Phase, manualTasks []ManualTask, outPath string) error {
+func (e *Executor) createManualTasksPlan(phase *types.Phase, manualTasks []ManualTask, outPath string) error {
 	// Build tasks from manual task checkpoints
 	var tasks []types.Task
 	for i, mt := range manualTasks {
@@ -1299,8 +1248,9 @@ func (e *Executor) createManualTasksPlan(phase *state.Phase, manualTasks []Manua
 	return state.SavePlanJSON(outPath, plan)
 }
 
-// ConvertToExecutionStructs converts JSON types to execution-compatible structs with paths
-func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*state.Phase, *state.Plan) {
+// ConvertToExecutionStructs converts JSON types to execution-compatible structs with runtime fields populated
+// The returned types.Phase and types.Plan have their runtime fields (Path, Name, IsCompleted) set
+func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*types.Phase, *types.Plan) {
 	// Build phase directory path
 	phaseDir := filepath.Join(planningDir, "phases",
 		fmt.Sprintf("%02d-%s", phaseData.Number, slugify(phaseData.Name)))
@@ -1312,27 +1262,30 @@ func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planD
 	// Extract plan name from objective or use default
 	planName := extractPlanName(planData.Objective)
 
-	phase := &state.Phase{
-		Number: phaseData.Number,
-		Name:   phaseData.Name,
-		Path:   phaseDir,
-		// Plans field can be populated if needed
+	// Create a copy of phaseData with runtime fields populated
+	phase := &types.Phase{
+		Number:      phaseData.Number,
+		Name:        phaseData.Name,
+		Goal:        phaseData.Goal,
+		Status:      phaseData.Status,
+		Plans:       phaseData.Plans,
+		Path:        phaseDir,
+		IsCompleted: phaseData.Status == types.StatusComplete,
 	}
 
-	// Determine plan type from tasks (check if any are manual)
-	planType := state.PlanTypeExecute // Default to execute
-	for _, task := range planData.Tasks {
-		if task.Type == types.TaskTypeManual {
-			planType = state.PlanTypeManual
-			break
-		}
-	}
-
-	plan := &state.Plan{
-		Number: planData.PlanNumber,
-		Name:   planName,
-		Path:   planPath,
-		Type:   planType,
+	// Create a copy of planData with runtime fields populated
+	plan := &types.Plan{
+		Phase:        planData.Phase,
+		PlanNumber:   planData.PlanNumber,
+		Status:       planData.Status,
+		Objective:    planData.Objective,
+		Tasks:        planData.Tasks,
+		Verification: planData.Verification,
+		CreatedAt:    planData.CreatedAt,
+		CompletedAt:  planData.CompletedAt,
+		Path:         planPath,
+		Name:         planName,
+		IsCompleted:  planData.Status == types.StatusComplete,
 	}
 
 	return phase, plan
@@ -1366,7 +1319,7 @@ func extractPlanName(objective string) string {
 }
 
 // updateStateAndRoadmap updates state.json and roadmap.json after plan completion
-func (e *Executor) updateStateAndRoadmap(phase *state.Phase, plan *state.Plan) error {
+func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) error {
 	// Update state.json
 	projectState, err := state.LoadStateJSON(e.config.PlanningDir)
 	if err != nil {
@@ -1386,7 +1339,7 @@ func (e *Executor) updateStateAndRoadmap(phase *state.Phase, plan *state.Plan) e
 	phaseDir := filepath.Join(e.config.PlanningDir, "phases",
 		fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
 	planJSONPath := filepath.Join(phaseDir,
-		fmt.Sprintf("%02d-%s.json", phase.Number, plan.Number))
+		fmt.Sprintf("%02d-%s.json", phase.Number, plan.PlanNumber))
 
 	// Load plan JSON
 	planJSON, err := state.LoadPlanJSON(planJSONPath)
@@ -1443,6 +1396,7 @@ func (e *Executor) updateStateAndRoadmap(phase *state.Phase, plan *state.Plan) e
 }
 
 // CommitAndPushRepos commits and pushes changes in all workspace repos
+// Returns an error if any git operations fail (after attempting all repos)
 func (e *Executor) CommitAndPushRepos(planId string) error {
 	// Find all git repos in workspace (submodules or sibling repos)
 	repos := []string{
@@ -1459,6 +1413,8 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		}
 	}
 
+	var errs []string
+
 	for _, repo := range repos {
 		// Check if there are changes to commit
 		statusCmd := exec.Command("git", "-C", repo, "status", "--porcelain")
@@ -1473,7 +1429,9 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		// Stage all changes
 		addCmd := exec.Command("git", "-C", repo, "add", "-A")
 		if err := addCmd.Run(); err != nil {
-			e.display.Warning(fmt.Sprintf("Failed to stage in %s: %v", repoName, err))
+			errMsg := fmt.Sprintf("failed to stage in %s: %v", repoName, err)
+			e.display.Warning(errMsg)
+			errs = append(errs, errMsg)
 			continue
 		}
 
@@ -1481,19 +1439,26 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 		commitMsg := fmt.Sprintf("chore(%s): auto-commit after plan completion", planId)
 		commitCmd := exec.Command("git", "-C", repo, "commit", "-m", commitMsg)
 		if err := commitCmd.Run(); err != nil {
-			e.display.Warning(fmt.Sprintf("Failed to commit in %s: %v", repoName, err))
+			errMsg := fmt.Sprintf("failed to commit in %s: %v", repoName, err)
+			e.display.Warning(errMsg)
+			errs = append(errs, errMsg)
 			continue
 		}
 
 		// Push to current branch
 		pushCmd := exec.Command("git", "-C", repo, "push")
 		if err := pushCmd.Run(); err != nil {
-			e.display.Warning(fmt.Sprintf("Failed to push %s: %v", repoName, err))
+			errMsg := fmt.Sprintf("failed to push %s: %v", repoName, err)
+			e.display.Warning(errMsg)
+			errs = append(errs, errMsg)
 			continue
 		}
 
 		e.display.Success(fmt.Sprintf("Pushed %s", repoName))
 	}
 
+	if len(errs) > 0 {
+		return fmt.Errorf("git operations failed: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
+	"github.com/daydemir/ralph/internal/types"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -114,8 +115,8 @@ Use --verbose for detailed information including decisions and issues.`,
 		nextPhaseData, nextPlanData, _ := state.FindNextPlanJSON(planningDir)
 
 		// Convert to display-compatible structures if found
-		var nextPhase *state.Phase
-		var nextPlan *state.Plan
+		var nextPhase *types.Phase
+		var nextPlan *types.Plan
 		if nextPhaseData != nil && nextPlanData != nil {
 			nextPhase, nextPlan = executor.ConvertToExecutionStructs(planningDir, nextPhaseData, nextPlanData)
 		}
@@ -284,7 +285,7 @@ func printArtifacts(p *planner.Planner, phases []state.Phase, green, dim func(a 
 }
 
 // printSuggestedActions shows context-aware next steps
-func printSuggestedActions(phases []state.Phase, nextPlan *state.Plan, total, completed int, cyan, green, dim, bold func(a ...interface{}) string) {
+func printSuggestedActions(phases []state.Phase, nextPlan *types.Plan, total, completed int, cyan, green, dim, bold func(a ...interface{}) string) {
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Println()
 	fmt.Println(bold("🎯 Suggested Next Actions:"))

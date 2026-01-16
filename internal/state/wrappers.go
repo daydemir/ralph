@@ -41,10 +41,11 @@ func FromTypesPhase(tp *types.Phase, phasePath string) *Phase {
 		return nil
 	}
 	return &Phase{
-		Number: tp.Number,
-		Name:   tp.Name,
-		Path:   phasePath,
-		Plans:  []Plan{}, // Plans populated separately
+		Number:      tp.Number,
+		Name:        tp.Name,
+		Path:        phasePath,
+		Plans:       []Plan{}, // Plans populated separately
+		IsCompleted: tp.Status == types.StatusComplete,
 	}
 }
 
@@ -53,10 +54,21 @@ func FromTypesPlan(tp *types.Plan, planPath string) *Plan {
 	if tp == nil {
 		return nil
 	}
+
+	// Determine plan type from tasks - if any task is manual, plan is manual
+	planType := PlanTypeExecute
+	for _, task := range tp.Tasks {
+		if task.Type == types.TaskTypeManual {
+			planType = PlanTypeManual
+			break
+		}
+	}
+
 	return &Plan{
-		Number: tp.PlanNumber,
-		Path:   planPath,
-		Type:   string(tp.Status), // Note: this is a simplification, may need adjustment
-		Status: string(tp.Status),
+		Number:      tp.PlanNumber,
+		Path:        planPath,
+		Type:        planType,
+		Status:      string(tp.Status),
+		IsCompleted: tp.Status == types.StatusComplete,
 	}
 }
