@@ -6,10 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
@@ -79,7 +81,7 @@ Use --verbose for detailed information including decisions and issues.`,
 			if phaseDir == "" {
 				// Fall back to slugified name if no directory found
 				phaseDir = filepath.Join(planningDir, "phases",
-					fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+					fmt.Sprintf("%02d-%s", p.Number, utils.Slugify(p.Name)))
 			}
 			phases[i] = state.Phase{
 				Number: p.Number,
@@ -135,11 +137,9 @@ Use --verbose for detailed information including decisions and issues.`,
 
 		// Progress bar
 		if total > 0 {
-			progress := float64(completed) / float64(total)
 			barWidth := 20
-			filledWidth := int(progress * float64(barWidth))
-			bar := strings.Repeat("█", filledWidth) + strings.Repeat("░", barWidth-filledWidth)
-			percentage := int(progress * 100)
+			bar := display.CreateProgressBar(completed, total, barWidth)
+			percentage := int(float64(completed) / float64(total) * 100)
 			fmt.Printf("Progress: [%s] %d%% (%d/%d plans)\n\n", bar, percentage, completed, total)
 		}
 
@@ -193,15 +193,8 @@ Use --verbose for detailed information including decisions and issues.`,
 				}
 
 				// Progress bar for phase
-				var bar string
-				if phaseTotal > 0 {
-					progress := float64(phaseComplete) / float64(phaseTotal)
-					barWidth := 10
-					filledWidth := int(progress * float64(barWidth))
-					bar = "[" + strings.Repeat("█", filledWidth) + strings.Repeat("░", barWidth-filledWidth) + "]"
-				} else {
-					bar = "[          ]"
-				}
+				barWidth := 10
+				bar := "[" + display.CreateProgressBar(phaseComplete, phaseTotal, barWidth) + "]"
 
 				var statusIcon string
 				if phaseComplete == phaseTotal && phaseTotal > 0 {

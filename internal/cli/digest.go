@@ -10,6 +10,7 @@ import (
 	"github.com/daydemir/ralph/internal/planner"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +59,7 @@ Examples:
 			// Search through phases to find the plan
 			for _, phase := range roadmap.Phases {
 				phaseDir := filepath.Join(planningDir, "phases",
-					fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+					fmt.Sprintf("%02d-%s", phase.Number, utils.Slugify(phase.Name)))
 
 				plans, err := state.LoadAllPlansJSON(phaseDir)
 				if err != nil {
@@ -86,7 +87,7 @@ Examples:
 			for i := len(roadmap.Phases) - 1; i >= 0; i-- {
 				phase := roadmap.Phases[i]
 				phaseDir := filepath.Join(planningDir, "phases",
-					fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+					fmt.Sprintf("%02d-%s", phase.Number, utils.Slugify(phase.Name)))
 
 				plans, err := state.LoadAllPlansJSON(phaseDir)
 				if err != nil {

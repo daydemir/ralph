@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/daydemir/ralph/internal/prompts"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // DiscoveryLevel represents the depth of research needed
@@ -45,7 +46,7 @@ func NewPhaseResearcher(claudeBinary, workDir string) *PhaseResearcher {
 	if claudeBinary == "" {
 		claudeBinary = "claude"
 	}
-	resolved := resolveBinaryPath(claudeBinary)
+	resolved := utils.ResolveBinaryPath(claudeBinary)
 	return &PhaseResearcher{
 		ClaudeBinary: resolved,
 		WorkDir:      workDir,

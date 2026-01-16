@@ -14,6 +14,7 @@ import (
 	"github.com/daydemir/ralph/internal/llm"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // Observation represents a finding captured during plan execution
@@ -283,6 +284,11 @@ func ParseSummaryObservations(content string) []Observation {
 func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *types.Plan) []string {
 	var subsequent []string
 
+	// Nil check to prevent panic when currentPlan is nil
+	if currentPlan == nil {
+		return subsequent
+	}
+
 	roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
 	if err != nil {
 		return subsequent
@@ -291,7 +297,7 @@ func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *t
 	foundCurrent := false
 	for _, p := range roadmap.Phases {
 		phaseDir := filepath.Join(e.config.PlanningDir, "phases",
-			fmt.Sprintf("%02d-%s", p.Number, slugify(p.Name)))
+			fmt.Sprintf("%02d-%s", p.Number, utils.Slugify(p.Name)))
 
 		// Load all plans for this phase from disk
 		plans, err := state.LoadAllPlansJSON(phaseDir)
@@ -566,7 +572,7 @@ func (e *Executor) CollectCheckpointObservations(phase *types.Phase) []Checkpoin
 			continue
 		}
 
-		planName := extractPlanName(plan.Objective)
+		planName := utils.ExtractPlanName(plan.Objective)
 
 		observations := ParseObservations(string(content), nil)
 		for _, o := range observations {

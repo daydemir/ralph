@@ -1,7 +1,0 @@
-# Ralph Progress Log
-
-This file tracks what Ralph has done across iterations.
-Ralph appends to this file after completing each PRD.
-
----
-

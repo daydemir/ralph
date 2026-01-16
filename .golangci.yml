@@ -1,0 +1,15 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - dupl
+
+linters-settings:
+  dupl:
+    threshold: 100
+
+issues:
+  exclude-use-default: false

@@ -1,19 +1,29 @@
 package utils
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // Slugify converts a name to a directory-safe slug
 // Example: "Critical Bug Fixes" -> "critical-bug-fixes"
 func Slugify(name string) string {
 	slug := strings.ToLower(name)
 	slug = strings.ReplaceAll(slug, " ", "-")
-	result := ""
+	var result strings.Builder
+	result.Grow(len(slug))
 	for _, c := range slug {
 		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
-			result += string(c)
+			result.WriteRune(c)
 		}
 	}
-	return result
+	return result.String()
+}
+
+// FileExists checks if a file exists at the given path
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // ExtractPlanName extracts a short name from the plan objective

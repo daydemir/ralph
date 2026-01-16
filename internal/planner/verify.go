@@ -11,6 +11,7 @@ import (
 
 	"github.com/daydemir/ralph/internal/prompts"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // VerificationIssue represents a single issue found during plan verification
@@ -44,7 +45,7 @@ func NewPlanVerifier(claudeBinary, workDir string) *PlanVerifier {
 	if claudeBinary == "" {
 		claudeBinary = "claude"
 	}
-	resolved := resolveBinaryPath(claudeBinary)
+	resolved := utils.ResolveBinaryPath(claudeBinary)
 	return &PlanVerifier{
 		ClaudeBinary: resolved,
 		WorkDir:      workDir,

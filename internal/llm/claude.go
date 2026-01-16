@@ -6,8 +6,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
+
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // ExecuteOptions contains options for Claude execution
@@ -30,54 +31,10 @@ func NewClaude(binaryPath string) *Claude {
 		binaryPath = "claude"
 	}
 	// Try to resolve the binary path
-	resolved := resolveBinaryPath(binaryPath)
+	resolved := utils.ResolveBinaryPath(binaryPath)
 	return &Claude{BinaryPath: resolved}
 }
 
-// resolveBinaryPath finds the claude binary, checking common locations
-func resolveBinaryPath(binaryPath string) string {
-	// If it's an absolute path, use it directly
-	if filepath.IsAbs(binaryPath) {
-		return binaryPath
-	}
-
-	// Check if it's in PATH
-	if path, err := exec.LookPath(binaryPath); err == nil {
-		return path
-	}
-
-	// Check common locations
-	home, _ := os.UserHomeDir()
-	commonPaths := []string{
-		filepath.Join(home, ".claude", "local", "claude"),
-		"/usr/local/bin/claude",
-		"/opt/homebrew/bin/claude",
-	}
-
-	for _, p := range commonPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	// Return original, will fail with helpful error later
-	return binaryPath
-}
-
-// claudeNotFoundError returns a helpful error message
-func claudeNotFoundError() error {
-	return fmt.Errorf(`claude not found in PATH
-
-To fix, add to your ~/.zshrc or ~/.bashrc:
-  export PATH="$HOME/.claude/local:$PATH"
-
-Then restart your terminal, or run:
-  source ~/.zshrc
-
-Alternatively, set the full path in .ralph/config.yaml:
-  claude:
-    binary: /path/to/claude`)
-}
 
 func (c *Claude) Name() string {
 	return "claude"
@@ -98,7 +55,7 @@ func (c *Claude) Execute(ctx context.Context, opts ExecuteOptions) (io.ReadClose
 
 	if err := cmd.Start(); err != nil {
 		if strings.Contains(err.Error(), "executable file not found") {
-			return nil, claudeNotFoundError()
+			return nil, utils.ClaudeNotFoundError()
 		}
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
@@ -162,6 +119,10 @@ type cmdReader struct {
 }
 
 func (r *cmdReader) Close() error {
-	r.ReadCloser.Close()
-	return r.cmd.Wait()
+	closeErr := r.ReadCloser.Close()
+	waitErr := r.cmd.Wait()
+	if waitErr != nil {
+		return waitErr
+	}
+	return closeErr
 }

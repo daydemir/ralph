@@ -12,44 +12,8 @@ import (
 
 	"github.com/daydemir/ralph/internal/prompts"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
-
-// resolveBinaryPath finds a binary, checking common locations
-func resolveBinaryPath(binaryPath string) string {
-	if filepath.IsAbs(binaryPath) {
-		return binaryPath
-	}
-
-	if path, err := exec.LookPath(binaryPath); err == nil {
-		return path
-	}
-
-	home, _ := os.UserHomeDir()
-	commonPaths := []string{
-		filepath.Join(home, ".claude", "local", "claude"),
-		"/usr/local/bin/claude",
-		"/opt/homebrew/bin/claude",
-	}
-
-	for _, p := range commonPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-
-	return binaryPath
-}
-
-// claudeNotFoundError returns a helpful error when Claude is not found
-func claudeNotFoundError() error {
-	return fmt.Errorf(`claude not found in PATH
-
-To fix, add to your ~/.zshrc or ~/.bashrc:
-  export PATH="$HOME/.claude/local:$PATH"
-
-Then restart your terminal, or run:
-  source ~/.zshrc`)
-}
 
 // Planner handles all planning operations using internal prompts
 type Planner struct {
@@ -62,7 +26,7 @@ func NewPlanner(claudeBinary, workDir string) *Planner {
 	if claudeBinary == "" {
 		claudeBinary = "claude"
 	}
-	resolved := resolveBinaryPath(claudeBinary)
+	resolved := utils.ResolveBinaryPath(claudeBinary)
 	return &Planner{
 		ClaudeBinary: resolved,
 		WorkDir:      workDir,
@@ -130,7 +94,7 @@ Run 'ralph discuss' to create your roadmap.`)
 // RunWithPrompt executes Claude with a given prompt
 func (p *Planner) RunWithPrompt(ctx context.Context, prompt string) error {
 	if _, err := exec.LookPath(p.ClaudeBinary); err != nil {
-		return claudeNotFoundError()
+		return utils.ClaudeNotFoundError()
 	}
 
 	args := []string{"--dangerously-skip-permissions", "-p", prompt}
@@ -143,7 +107,7 @@ func (p *Planner) RunWithPrompt(ctx context.Context, prompt string) error {
 
 	if err := cmd.Run(); err != nil {
 		if strings.Contains(err.Error(), "executable file not found") {
-			return claudeNotFoundError()
+			return utils.ClaudeNotFoundError()
 		}
 		return fmt.Errorf("command failed: %w", err)
 	}

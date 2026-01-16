@@ -87,7 +87,7 @@ func (d *Display) RalphBox(title string, lines ...string) {
 
 // RalphStatus prints a single-line Ralph status message (no box)
 func (d *Display) RalphStatus(symbol, message string) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	fmt.Printf("%s %s %s\n",
 		d.theme.RalphBorder(timestamp),
 		symbol,
@@ -121,7 +121,7 @@ func (d *Display) Resume(message string) {
 
 // ClaudeStart prints a header when Claude execution begins
 func (d *Display) ClaudeStart() {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	fmt.Printf("  %s %s Sending to Claude...\n",
 		d.theme.Dim(timestamp),
 		d.theme.ClaudeTimestamp(GutterClaude))
@@ -172,7 +172,7 @@ func (d *Display) wrapText(text string, maxWidth int) []string {
 
 // Claude prints Claude Code output with left gutter indicator
 func (d *Display) Claude(text string, toolCount int) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	gutter := d.theme.ClaudeTimestamp(GutterClaude)
 
 	toolStr := ""
@@ -193,7 +193,7 @@ func (d *Display) Claude(text string, toolCount int) {
 
 // ClaudeWithTokens prints Claude Code output with token stats
 func (d *Display) ClaudeWithTokens(text string, toolCount int, tokens TokenStats) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	gutter := d.theme.ClaudeTimestamp(GutterClaude)
 
 	toolStr := ""
@@ -217,7 +217,7 @@ func (d *Display) ClaudeWithTokens(text string, toolCount int, tokens TokenStats
 
 // ClaudeDone prints Claude completion message (indented)
 func (d *Display) ClaudeDone(result string) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	line := fmt.Sprintf("%s%s %s %s",
 		IndentClaude,
 		d.theme.ClaudeTimestamp(timestamp),
@@ -321,9 +321,24 @@ func CleanText(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// GetTimestamp returns the current time in [HH:MM:SS] format
+func GetTimestamp() string {
+	return time.Now().Format("[15:04:05]")
+}
+
+// CreateProgressBar creates a text progress bar
+func CreateProgressBar(completed, total, width int) string {
+	if total == 0 {
+		return strings.Repeat("░", width)
+	}
+	progress := float64(completed) / float64(total)
+	filledWidth := int(progress * float64(width))
+	return strings.Repeat("█", filledWidth) + strings.Repeat("░", width-filledWidth)
+}
+
 // AnalysisStart prints header when analysis begins
 func (d *Display) AnalysisStart(observationCount int) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	fmt.Printf("\n%s %s %s\n",
 		d.theme.Dim(timestamp),
 		d.theme.AnalysisGutter(GutterAnalysis),
@@ -344,7 +359,7 @@ func (d *Display) Analysis(text string) {
 
 // AnalysisComplete prints analysis completion
 func (d *Display) AnalysisComplete(modified, newPlans int) {
-	timestamp := time.Now().Format("[15:04:05]")
+	timestamp := GetTimestamp()
 	fmt.Printf("%s %s %s\n",
 		d.theme.Dim(timestamp),
 		d.theme.AnalysisGutter(GutterAnalysis),

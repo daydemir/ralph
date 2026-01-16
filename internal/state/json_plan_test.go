@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 func TestSlugify(t *testing.T) {
@@ -84,9 +85,9 @@ func TestSlugify(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := slugify(tt.input)
+			got := utils.Slugify(tt.input)
 			if got != tt.expected {
-				t.Errorf("slugify(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("Slugify(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}

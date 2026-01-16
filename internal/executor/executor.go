@@ -15,6 +15,7 @@ import (
 	"github.com/daydemir/ralph/internal/prompts"
 	"github.com/daydemir/ralph/internal/state"
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // loadExecutorPrompt loads the executor agent prompt from internal templates
@@ -330,7 +331,12 @@ func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *type
 		"Complete manual tasks, then /exit when done")
 
 	// Build prompt using internal executor prompt
-	executorPrompt, _ := loadExecutorPrompt()
+	executorPrompt, err := loadExecutorPrompt()
+	if err != nil {
+		result.Error = fmt.Errorf("cannot load executor prompt: %w", err)
+		result.FailureType = FailureHard
+		return result
+	}
 	prompt := fmt.Sprintf(`%s
 
 ## Current Plan (Manual Tasks)
@@ -353,7 +359,7 @@ Begin by reading the plan and presenting the first task.`, executorPrompt, plan.
 	}
 
 	// Run interactively (uses --dangerously-skip-permissions)
-	err := e.claude.ExecuteInteractive(ctx, opts)
+	err = e.claude.ExecuteInteractive(ctx, opts)
 	if err != nil {
 		result.Error = err
 		result.FailureType = FailureSoft
@@ -428,10 +434,11 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				if retryState != nil && retryState.Attempts >= maxRetries {
 					return fmt.Errorf("exceeded max retries (%d) for plan %s", maxRetries, plan.Name)
 				}
-				// Same progress but still have retries - will be handled below
+				// Same progress but still have retries - will be handled below (no Resume message)
+			} else {
+				// Progress section was updated = bailout recovery, allow continuation
+				e.display.Resume(fmt.Sprintf("Resuming %s (Progress updated, continuing)", plan.Name))
 			}
-			// Progress section was updated = bailout recovery, allow continuation
-			e.display.Resume(fmt.Sprintf("Resuming %s (Progress updated, continuing)", plan.Name))
 		}
 		lastPlanPath = plan.Path
 		lastProgressContent = extractProgressSection(plan.Path)
@@ -1109,23 +1116,6 @@ Then restart your terminal, or run:
   source ~/.zshrc`)
 }
 
-// resolveBinaryPath finds a binary, checking common locations
-func resolveBinaryPath(name string) string {
-	if filepath.IsAbs(name) {
-		return name
-	}
-
-	if path, err := exec.LookPath(name); err == nil {
-		return path
-	}
-
-	home, _ := os.UserHomeDir()
-	if strings.HasPrefix(name, "~") {
-		return filepath.Join(home, name[1:])
-	}
-
-	return name
-}
 
 // ManualTask represents a manual task extracted from a plan
 type ManualTask struct {
@@ -1164,7 +1154,7 @@ func (e *Executor) MaybeCreateManualTasksPlan(phase *types.Phase) (bool, error) 
 			continue
 		}
 
-		planName := extractPlanName(plan.Objective)
+		planName := utils.ExtractPlanName(plan.Objective)
 
 		// Find all tasks and check their types
 		matches := taskWithTypePattern.FindAllStringSubmatch(string(content), -1)
@@ -1253,14 +1243,14 @@ func (e *Executor) createManualTasksPlan(phase *types.Phase, manualTasks []Manua
 func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*types.Phase, *types.Plan) {
 	// Build phase directory path
 	phaseDir := filepath.Join(planningDir, "phases",
-		fmt.Sprintf("%02d-%s", phaseData.Number, slugify(phaseData.Name)))
+		fmt.Sprintf("%02d-%s", phaseData.Number, utils.Slugify(phaseData.Name)))
 
 	// Build plan path (format: {phase}-{plan}.json)
 	planPath := filepath.Join(phaseDir,
 		fmt.Sprintf("%02d-%s.json", phaseData.Number, planData.PlanNumber))
 
 	// Extract plan name from objective or use default
-	planName := extractPlanName(planData.Objective)
+	planName := utils.ExtractPlanName(planData.Objective)
 
 	// Create a copy of phaseData with runtime fields populated
 	phase := &types.Phase{
@@ -1291,32 +1281,6 @@ func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planD
 	return phase, plan
 }
 
-// slugify converts a name to a directory-safe slug
-func slugify(name string) string {
-	slug := strings.ToLower(name)
-	slug = strings.ReplaceAll(slug, " ", "-")
-	result := ""
-	for _, c := range slug {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
-			result += string(c)
-		}
-	}
-	return result
-}
-
-// extractPlanName extracts a short name from the plan objective
-func extractPlanName(objective string) string {
-	// Take first sentence or first 80 chars
-	lines := strings.Split(objective, ".")
-	if len(lines) > 0 {
-		name := strings.TrimSpace(lines[0])
-		if len(name) > 80 {
-			name = name[:77] + "..."
-		}
-		return name
-	}
-	return objective
-}
 
 // updateStateAndRoadmap updates state.json and roadmap.json after plan completion
 func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) error {
@@ -1337,7 +1301,7 @@ func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) e
 	// Update the plan JSON file to mark it complete
 	// Build plan JSON path (format: {phase-dir}/{phase}-{plan}.json)
 	phaseDir := filepath.Join(e.config.PlanningDir, "phases",
-		fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+		fmt.Sprintf("%02d-%s", phase.Number, utils.Slugify(phase.Name)))
 	planJSONPath := filepath.Join(phaseDir,
 		fmt.Sprintf("%02d-%s.json", phase.Number, plan.PlanNumber))
 

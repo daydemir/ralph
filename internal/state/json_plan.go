@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/daydemir/ralph/internal/types"
+	"github.com/daydemir/ralph/internal/utils"
 )
 
 // LoadPlanJSON loads a plan from a JSON file (e.g., .planning/phases/01-name/01-01.json)
@@ -124,7 +125,7 @@ func FindNextPlanJSON(planningDir string) (*types.Phase, *types.Plan, error) {
 		if phaseDir == "" {
 			// Fall back to slugified name if no directory found
 			phaseDir = filepath.Join(planningDir, "phases",
-				fmt.Sprintf("%02d-%s", phase.Number, slugify(phase.Name)))
+				fmt.Sprintf("%02d-%s", phase.Number, utils.Slugify(phase.Name)))
 		}
 
 		plans, err := LoadAllPlansJSON(phaseDir)
@@ -149,20 +150,6 @@ func FindNextPlanJSON(planningDir string) (*types.Phase, *types.Plan, error) {
 	return nil, nil, nil
 }
 
-// slugify converts a phase name to a directory-safe slug
-// Example: "Critical Bug Fixes" -> "critical-bug-fixes"
-func slugify(name string) string {
-	slug := strings.ToLower(name)
-	slug = strings.ReplaceAll(slug, " ", "-")
-	// Remove any non-alphanumeric characters except hyphens
-	result := ""
-	for _, c := range slug {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
-			result += string(c)
-		}
-	}
-	return result
-}
 
 // FindPhaseDirByNumber finds a phase directory by its number prefix
 // Looks for directories matching "NN-*" pattern in .planning/phases/
