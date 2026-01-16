@@ -15,6 +15,7 @@ Ralph executes your development plans automatically. You define what to build, R
 
 ## Table of Contents
 - [How It Works](#how-it-works)
+- [Concept Hierarchy](#concept-hierarchy)
 - [When to Use Ralph](#when-to-use-ralph)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -53,6 +54,36 @@ Ralph uses a **phase-by-phase workflow**. You don't plan everything upfront - yo
 
          At any time: ralph status (see where you are)
 ```
+
+## Concept Hierarchy
+
+Ralph organizes work into a clear hierarchy. Here's how the structures nest:
+
+```
+Project (PROJECT.md)
+├── Roadmap (ROADMAP.md)
+│   ├── Phase 1 (integer)
+│   │   ├── 01-01-PLAN.md
+│   │   ├── 01-01-SUMMARY.md
+│   │   └── 01-02-PLAN.md
+│   ├── Phase 2 (integer)
+│   │   └── 02-01-PLAN.md
+│   ├── Phase 2.1 (decimal - INSERTED)
+│   │   └── 02.1-01-PLAN.md
+│   └── Phase 3 (integer)
+│       └── ...
+└── STATE.md
+```
+
+**Concepts:**
+- **Project** - Top-level vision and requirements (PROJECT.md)
+- **Roadmap** - Breakdown into phases (ROADMAP.md)
+- **Phase** - Unit of work, integer (1, 2, 3) or decimal (5.1 for urgent insertions)
+- **Plan** - Executable task bundle (NN-MM-PLAN.md)
+- **Task** - Individual unit of work (XML in plan files)
+- **Summary** - Completion marker (NN-MM-SUMMARY.md)
+
+**Phase numbering:** Integer phases (1, 2, 3) are planned work. Decimal phases (5.1, 5.2) are urgent insertions that execute between surrounding integers (e.g., 5 → 5.1 → 6).
 
 ## When to Use Ralph
 
