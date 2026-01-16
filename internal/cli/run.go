@@ -64,22 +64,24 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 
 		planningDir := gsd.PlanningDir()
 
-		// Load phases and find next plan
-		phases, err := state.LoadPhases(planningDir)
+		// Find next plan using JSON roadmap
+		phaseData, planData, err := state.FindNextPlanJSON(planningDir)
 		if err != nil {
-			return fmt.Errorf("cannot load phases: %w", err)
+			return fmt.Errorf("cannot find next plan: %w", err)
 		}
 
 		disp := display.New()
 
-		phase, plan := state.FindNextPlan(phases)
-		if plan == nil {
+		if planData == nil {
 			disp.AllComplete()
 			fmt.Println("\nTo add more work:")
 			fmt.Println("  ralph add-phase \"New feature description\"")
 			fmt.Println("  ralph plan N")
 			return nil
 		}
+
+		// Convert to execution-compatible structures with paths
+		phase, plan := executor.ConvertToExecutionStructs(planningDir, phaseData, planData)
 
 		// Create executor
 		config := executor.DefaultConfig(cwd)
@@ -117,10 +119,14 @@ Then 'ralph plan 1' to create plans for Phase 1.`)
 
 		// Show what's next
 		fmt.Println()
-		phases, _ = state.LoadPhases(planningDir)
-		_, nextPlan := state.FindNextPlan(phases)
-		if nextPlan != nil {
-			disp.Info("Next", nextPlan.Name)
+		_, nextPlanData, _ := state.FindNextPlanJSON(planningDir)
+		if nextPlanData != nil {
+			// Extract plan name from objective for display
+			planName := nextPlanData.Objective
+			if len(planName) > 80 {
+				planName = planName[:77] + "..."
+			}
+			disp.Info("Next", planName)
 			fmt.Println("Run 'ralph run' to continue, or 'ralph run --loop' for autonomous execution.")
 		} else {
 			disp.Success("All plans in this phase complete!")

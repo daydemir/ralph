@@ -423,7 +423,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 		}
 
 		// Convert to execution-compatible structures with paths
-		phase, plan := convertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
+		phase, plan := ConvertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
 
 		// Check for stuck loop - same plan found twice with NO progress made
 		// This allows bailout recovery (same plan, but Progress section updated)
@@ -460,7 +460,7 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 				return nil
 			}
 			// Convert to execution-compatible structures
-			phase, plan = convertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
+			phase, plan = ConvertToExecutionStructs(e.config.PlanningDir, phaseData, planData)
 		}
 
 		// Count plans from roadmap (simplified for now - will be improved in 02-03)
@@ -1444,8 +1444,8 @@ Complete all manual tasks that couldn't be automated during phase execution.
 	return os.WriteFile(outPath, []byte(content.String()), 0644)
 }
 
-// convertToExecutionStructs converts JSON types to execution-compatible structs with paths
-func convertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*state.Phase, *state.Plan) {
+// ConvertToExecutionStructs converts JSON types to execution-compatible structs with paths
+func ConvertToExecutionStructs(planningDir string, phaseData *types.Phase, planData *types.Plan) (*state.Phase, *state.Plan) {
 	// Build phase directory path
 	phaseDir := filepath.Join(planningDir, "phases",
 		fmt.Sprintf("%02d-%s", phaseData.Number, slugify(phaseData.Name)))
