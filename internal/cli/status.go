@@ -51,14 +51,20 @@ Use --verbose for detailed information including decisions and issues.`,
 
 		planningDir := gsd.PlanningDir()
 
-		// Load state
-		st, err := state.LoadState(planningDir)
+		// Load state from JSON
+		projectState, err := state.LoadStateJSON(planningDir)
 		if err != nil {
-			// STATE.md might not exist yet
-			st = &state.State{
-				ProjectName: "Project",
-				Status:      "Not started",
-			}
+			// state.json might not exist yet - show error and exit
+			yellow := color.New(color.FgYellow).SprintFunc()
+			fmt.Printf("%s Cannot load state: %v\n", yellow("!"), err)
+			fmt.Println("\nState file not found or invalid.")
+			return nil
+		}
+
+		// Load roadmap for project name and total phases
+		roadmap, err := state.LoadRoadmapJSON(planningDir)
+		if err != nil {
+			return fmt.Errorf("cannot load roadmap: %w", err)
 		}
 
 		// Load phases
@@ -80,7 +86,7 @@ Use --verbose for detailed information including decisions and issues.`,
 		bold := color.New(color.Bold).SprintFunc()
 		dim := color.New(color.FgHiBlack).SprintFunc()
 
-		fmt.Printf("%s\n%s\n\n", bold(st.ProjectName), dim(fmt.Sprintf("ralph v%s", Version)))
+		fmt.Printf("%s\n%s\n\n", bold(roadmap.ProjectName), dim(fmt.Sprintf("ralph v%s", Version)))
 
 		// Project artifacts
 		printArtifacts(gsd, phases, green, dim)
@@ -97,14 +103,20 @@ Use --verbose for detailed information including decisions and issues.`,
 
 		// Current position
 		fmt.Println(bold("📍 Current Position:"))
-		if st.CurrentPhase > 0 {
-			fmt.Printf("  Phase: %d of %d\n", st.CurrentPhase, st.TotalPhases)
+		totalPhases := len(roadmap.Phases)
+		if projectState.CurrentPhase > 0 {
+			fmt.Printf("  Phase: %d of %d\n", projectState.CurrentPhase, totalPhases)
 			if nextPlan != nil {
 				fmt.Printf("  Plan:  %s (next)\n", nextPlan.Name)
 			} else {
 				fmt.Printf("  Plan:  All complete\n")
 			}
-			fmt.Printf("  Status: %s\n", st.Status)
+			// Derive status from phases
+			status := "In progress"
+			if nextPlan == nil {
+				status = "Phase complete"
+			}
+			fmt.Printf("  Status: %s\n", status)
 		} else if nextPhase != nil {
 			fmt.Printf("  Phase: %d (%s)\n", nextPhase.Number, nextPhase.Name)
 			fmt.Printf("  Plan:  %s\n", nextPlan.Name)
