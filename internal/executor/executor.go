@@ -34,12 +34,11 @@ const (
 
 // Config holds executor configuration
 type Config struct {
-	ClaudeBinary          string
-	Model                 string
-	InactivityTimeoutMins int
-	WorkDir               string
-	PlanningDir           string
-	MaxRetries            int
+	ClaudeBinary string
+	Model        string
+	WorkDir      string
+	PlanningDir  string
+	MaxRetries   int
 }
 
 // PlanRetryState tracks retry state for progressive guidance
@@ -52,11 +51,10 @@ type PlanRetryState struct {
 // DefaultConfig returns default executor configuration
 func DefaultConfig(workDir string) *Config {
 	return &Config{
-		ClaudeBinary:          "claude",
-		Model:                 "sonnet",
-		InactivityTimeoutMins: 60,
-		WorkDir:               workDir,
-		PlanningDir:           filepath.Join(workDir, ".planning"),
+		ClaudeBinary: "claude",
+		Model:        "sonnet",
+		WorkDir:      workDir,
+		PlanningDir:  filepath.Join(workDir, ".planning"),
 	}
 }
 
@@ -89,6 +87,13 @@ type RunResult struct {
 
 // ExecutePlan runs a single plan and returns the result
 func (e *Executor) ExecutePlan(ctx context.Context, phase *types.Phase, plan *types.Plan) *RunResult {
+	if phase == nil || plan == nil {
+		return &RunResult{
+			Error:       fmt.Errorf("ExecutePlan: phase and plan must not be nil"),
+			FailureType: FailureHard,
+		}
+	}
+
 	start := time.Now()
 	result := &RunResult{
 		PlanPath: plan.Path,
@@ -367,6 +372,13 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *types.Phase, plan *ty
 
 // ExecuteManualPlanInteractive opens an interactive Claude session for manual tasks
 func (e *Executor) ExecuteManualPlanInteractive(ctx context.Context, phase *types.Phase, plan *types.Plan, start time.Time) *RunResult {
+	if phase == nil || plan == nil {
+		return &RunResult{
+			Error:       fmt.Errorf("ExecuteManualPlanInteractive: phase and plan must not be nil"),
+			FailureType: FailureHard,
+		}
+	}
+
 	result := &RunResult{
 		PlanPath: plan.Path,
 	}
@@ -1442,7 +1454,10 @@ func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) e
 func (e *Executor) SafeCommitProgress(reason string) {
 	// Check if there are changes to commit
 	statusCmd := exec.Command("git", "-C", e.config.WorkDir, "status", "--porcelain")
-	output, _ := statusCmd.Output()
+	output, err := statusCmd.Output()
+	if err != nil {
+		e.display.Warning(fmt.Sprintf("git status failed: %v", err))
+	}
 	if len(output) == 0 {
 		return // No changes to commit
 	}
@@ -1494,7 +1509,10 @@ func (e *Executor) CommitAndPushRepos(planId string) error {
 	for _, repo := range repos {
 		// Check if there are changes to commit
 		statusCmd := exec.Command("git", "-C", repo, "status", "--porcelain")
-		output, _ := statusCmd.Output()
+		output, err := statusCmd.Output()
+		if err != nil {
+			e.display.Warning(fmt.Sprintf("git status failed: %v", err))
+		}
 		if len(output) == 0 {
 			continue // No changes in this repo
 		}

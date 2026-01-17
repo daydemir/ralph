@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/daydemir/ralph/internal/config"
 	"github.com/daydemir/ralph/internal/display"
 	"github.com/daydemir/ralph/internal/executor"
 	"github.com/daydemir/ralph/internal/planner"
@@ -46,6 +47,12 @@ Verification failures stop the loop immediately.`,
 			return err
 		}
 
+		// Load Ralph config
+		cfg, err := config.Load(cwd)
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+
 		// Check prerequisites
 		if err := executor.CheckClaudeInstalled(); err != nil {
 			return err
@@ -67,7 +74,7 @@ Then run 'ralph discuss' again to create plans for Phase 1.`)
 		// Find next plan using JSON roadmap
 		phaseData, planData, err := state.FindNextPlanJSON(planningDir)
 		if err != nil {
-			return fmt.Errorf("cannot find next plan: %w", err)
+			return fmt.Errorf("cannot find next plan in %s: %w", planningDir, err)
 		}
 
 		disp := display.New()
@@ -83,18 +90,20 @@ Then run 'ralph discuss' again to create plans for Phase 1.`)
 		// Convert to execution-compatible structures with paths
 		phase, plan := executor.ConvertToExecutionStructs(planningDir, phaseData, planData)
 
-		// Create executor
-		config := executor.DefaultConfig(cwd)
+		// Create executor config from loaded config
+		execConfig := executor.DefaultConfig(cwd)
+		execConfig.ClaudeBinary = cfg.Claude.Binary
+		execConfig.Model = cfg.LLM.Model
 		if runModel != "" {
-			config.Model = runModel
+			execConfig.Model = runModel
 		}
 		if maxRetries > 0 {
-			config.MaxRetries = maxRetries
+			execConfig.MaxRetries = maxRetries
 		} else if runLoop > 0 {
 			// Default max-retries to same as loop value if not specified
-			config.MaxRetries = runLoop
+			execConfig.MaxRetries = runLoop
 		}
-		exec := executor.New(config)
+		exec := executor.New(execConfig)
 
 		ctx := context.Background()
 

@@ -55,6 +55,11 @@ type AnalysisResult struct {
 func (e *Executor) RunPostAnalysis(ctx context.Context, phase *types.Phase, plan *types.Plan, skipAnalysis bool, execCtx *ExecutionContext) *AnalysisResult {
 	result := &AnalysisResult{}
 
+	if phase == nil || plan == nil {
+		result.Error = fmt.Errorf("RunPostAnalysis: phase and plan must not be nil")
+		return result
+	}
+
 	if skipAnalysis {
 		e.display.Info("Analysis", "Skipped (--skip-analysis flag)")
 		return result
@@ -292,6 +297,7 @@ func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *t
 
 	roadmap, err := state.LoadRoadmapJSON(e.config.PlanningDir)
 	if err != nil {
+		e.display.Warning(fmt.Sprintf("skipping subsequent plan search: failed to load roadmap: %v", err))
 		return subsequent
 	}
 
@@ -303,6 +309,7 @@ func (e *Executor) findSubsequentPlans(currentPhase *types.Phase, currentPlan *t
 		// Load all plans for this phase from disk
 		plans, err := state.LoadAllPlansJSON(phaseDir)
 		if err != nil {
+			e.display.Warning(fmt.Sprintf("skipping phase %d (%s): failed to load plans: %v", p.Number, p.Name, err))
 			continue
 		}
 
@@ -582,6 +589,7 @@ func (e *Executor) CollectCheckpointObservations(phase *types.Phase) []Checkpoin
 	// Load all plans for this phase from disk
 	plans, err := state.LoadAllPlansJSON(phase.Path)
 	if err != nil {
+		e.display.Warning(fmt.Sprintf("skipping checkpoint collection for phase %d: failed to load plans: %v", phase.Number, err))
 		return verifications
 	}
 
@@ -594,6 +602,7 @@ func (e *Executor) CollectCheckpointObservations(phase *types.Phase) []Checkpoin
 		planPath := filepath.Join(phase.Path, fmt.Sprintf("%02d-%s.json", phase.Number, plan.PlanNumber))
 		content, err := os.ReadFile(planPath)
 		if err != nil {
+			e.display.Warning(fmt.Sprintf("skipping plan %s: failed to read file: %v", planPath, err))
 			continue
 		}
 
@@ -640,6 +649,7 @@ func (e *Executor) IsPhaseComplete(phase *types.Phase) bool {
 	// Load all plans for this phase from disk
 	plans, err := state.LoadAllPlansJSON(phase.Path)
 	if err != nil {
+		e.display.Warning(fmt.Sprintf("skipping phase completion check: failed to load plans for phase %d: %v", phase.Number, err))
 		return false
 	}
 

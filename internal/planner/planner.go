@@ -401,6 +401,10 @@ func (p *Planner) InsertPhase(ctx context.Context, afterPhase string, descriptio
 		return fmt.Errorf("invalid phase number: %s", afterPhase)
 	}
 
+	if strings.TrimSpace(description) == "" {
+		return fmt.Errorf("phase description cannot be empty")
+	}
+
 	// Read current roadmap
 	roadmapPath := filepath.Join(p.PlanningDir(), "roadmap.json")
 	data, err := os.ReadFile(roadmapPath)
@@ -594,7 +598,7 @@ func (p *Planner) SyncRoadmap(phase string) error {
 	phasesDir := filepath.Join(p.PlanningDir(), "phases")
 	entries, err := os.ReadDir(phasesDir)
 	if err != nil {
-		return nil // No phases directory yet
+		return fmt.Errorf("cannot read phases directory %s: %w", phasesDir, err)
 	}
 
 	// Find the phase directory

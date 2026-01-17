@@ -498,12 +498,11 @@ claude:
 
 build:
   default_loop_iterations: 10    # Default max iterations for --loop
-  signals:
-    iteration_complete: "###ITERATION_COMPLETE###"
-    ralph_complete: "###RALPH_COMPLETE###"
 ```
 
 Ralph uses sensible defaults if no config file exists.
+
+> **Note:** The inactivity timeout (60 minutes) is enforced by Claude Code itself, not Ralph. Ralph monitors for Claude's output but does not independently enforce timeouts.
 
 ## Troubleshooting
 

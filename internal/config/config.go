@@ -10,10 +10,9 @@ import (
 
 // Config represents the ralph configuration
 type Config struct {
-	LLM     LLMConfig     `mapstructure:"llm"`
-	Claude  ClaudeConfig  `mapstructure:"claude"`
-	Mistral MistralConfig `mapstructure:"mistral"`
-	Build   BuildConfig   `mapstructure:"build"`
+	LLM    LLMConfig    `mapstructure:"llm"`
+	Claude ClaudeConfig `mapstructure:"claude"`
+	Build  BuildConfig  `mapstructure:"build"`
 }
 
 // LLMConfig contains LLM backend settings
@@ -28,30 +27,9 @@ type ClaudeConfig struct {
 	AllowedTools []string `mapstructure:"allowed_tools"`
 }
 
-// MistralConfig contains Mistral-specific settings
-type MistralConfig struct {
-	Binary string `mapstructure:"binary"`
-	APIKey string `mapstructure:"api_key"`
-}
-
 // BuildConfig contains build/execution settings
 type BuildConfig struct {
-	DefaultLoopIterations int                `mapstructure:"default_loop_iterations"`
-	Signals               SignalsConfig      `mapstructure:"signals"`
-	Verification          VerificationConfig `mapstructure:"verification"`
-}
-
-// SignalsConfig contains completion signal patterns
-type SignalsConfig struct {
-	IterationComplete string `mapstructure:"iteration_complete"`
-	RalphComplete     string `mapstructure:"ralph_complete"`
-}
-
-// VerificationConfig contains project-specific build/test commands
-type VerificationConfig struct {
-	RequirePass   bool              `mapstructure:"require_pass"`
-	BuildCommands map[string]string `mapstructure:"build_commands"`
-	TestCommands  map[string]string `mapstructure:"test_commands"`
+	DefaultLoopIterations int `mapstructure:"default_loop_iterations"`
 }
 
 // Load reads the config from the workspace
@@ -95,21 +73,8 @@ func DefaultConfig() *Config {
 				"Task", "TodoWrite", "WebFetch", "WebSearch",
 			},
 		},
-		Mistral: MistralConfig{
-			Binary: "vibe",
-			APIKey: "",
-		},
 		Build: BuildConfig{
 			DefaultLoopIterations: 10,
-			Signals: SignalsConfig{
-				IterationComplete: "###ITERATION_COMPLETE###",
-				RalphComplete:     "###RALPH_COMPLETE###",
-			},
-			Verification: VerificationConfig{
-				RequirePass:   true,
-				BuildCommands: make(map[string]string),
-				TestCommands:  make(map[string]string),
-			},
 		},
 	}
 }
@@ -129,23 +94,7 @@ func applyDefaults(cfg *Config) {
 	if len(cfg.Claude.AllowedTools) == 0 {
 		cfg.Claude.AllowedTools = defaults.Claude.AllowedTools
 	}
-	if cfg.Mistral.Binary == "" {
-		cfg.Mistral.Binary = defaults.Mistral.Binary
-	}
 	if cfg.Build.DefaultLoopIterations == 0 {
 		cfg.Build.DefaultLoopIterations = defaults.Build.DefaultLoopIterations
-	}
-	if cfg.Build.Signals.IterationComplete == "" {
-		cfg.Build.Signals.IterationComplete = defaults.Build.Signals.IterationComplete
-	}
-	if cfg.Build.Signals.RalphComplete == "" {
-		cfg.Build.Signals.RalphComplete = defaults.Build.Signals.RalphComplete
-	}
-	// Verification defaults - RequirePass defaults to true if not explicitly set
-	if cfg.Build.Verification.BuildCommands == nil {
-		cfg.Build.Verification.BuildCommands = make(map[string]string)
-	}
-	if cfg.Build.Verification.TestCommands == nil {
-		cfg.Build.Verification.TestCommands = make(map[string]string)
 	}
 }
