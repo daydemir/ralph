@@ -46,6 +46,7 @@ brews:
     repository:
       owner: daydemir
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/daydemir/ralph
     description: Autonomous plan execution engine built on GSD planning
