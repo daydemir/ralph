@@ -78,6 +78,7 @@ func InitStateJSON(planningDir string) error {
 	}
 
 	// Create initial state
+	// Note: CurrentPhase is deprecated - use DeriveCurrentPhase() instead
 	state := &types.ProjectState{
 		Version:      "1.0",
 		CurrentPhase: 1,
@@ -86,4 +87,28 @@ func InitStateJSON(planningDir string) error {
 
 	// Save the initial state
 	return SaveStateJSON(planningDir, state)
+}
+
+// DeriveCurrentPhase scans roadmap.json to determine the current phase
+// This is the source of truth - don't rely on state.json's CurrentPhase field
+// Returns the number of the first incomplete phase, or the last phase if all complete
+func DeriveCurrentPhase(planningDir string) (int, error) {
+	roadmap, err := LoadRoadmapJSON(planningDir)
+	if err != nil {
+		return 0, fmt.Errorf("cannot load roadmap: %w", err)
+	}
+
+	if len(roadmap.Phases) == 0 {
+		return 0, nil
+	}
+
+	// Find the first incomplete phase
+	for _, phase := range roadmap.Phases {
+		if phase.Status != types.StatusComplete {
+			return phase.Number, nil
+		}
+	}
+
+	// All phases complete - return last phase number
+	return roadmap.Phases[len(roadmap.Phases)-1].Number, nil
 }

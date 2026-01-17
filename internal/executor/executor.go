@@ -283,25 +283,47 @@ func (e *Executor) ExecutePlan(ctx context.Context, phase *types.Phase, plan *ty
 
 			// Only mark complete if all validations passed
 			if validationPassed {
-				// Success - explicit completion signal with summary.json and validations verified
-				result.Success = true
-				result.FailureType = FailureNone
-				statusLines = append(statusLines,
-					fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
-
-				// Update state.json and roadmap.json
-				if err := e.updateStateAndRoadmap(phase, plan); err != nil {
-					e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+				// Run build verification before final success
+				buildResult := e.VerifyProjectBuilds(ctx)
+				if !buildResult.Success {
+					// Try auto-fix
+					buildResult = e.TryAutoFix(ctx, buildResult, plan)
 				}
 
-				// Commit and push all repos
-				planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
-				e.CommitAndPushRepos(planId)
+				if !buildResult.Success {
+					// Build verification failed even after auto-fix
+					result.Error = buildResult.Error
+					result.FailureType = FailureSoft // Soft failure allows retry
+					if buildResult.BuildSystem != nil {
+						statusLines = append(statusLines,
+							fmt.Sprintf("%s Build verification failed (%s)", e.display.Theme().Warning(display.SymbolWarning), buildResult.BuildSystem.Name))
+					} else {
+						statusLines = append(statusLines,
+							fmt.Sprintf("%s Build verification failed", e.display.Theme().Warning(display.SymbolWarning)))
+					}
+				} else {
+					// Success - explicit completion signal with summary.json, validations, and build verified
+					result.Success = true
+					result.FailureType = FailureNone
+					statusLines = append(statusLines,
+						fmt.Sprintf("%s Plan complete!", e.display.Theme().Success(display.SymbolSuccess)))
+
+					// Update state.json and roadmap.json
+					if err := e.updateStateAndRoadmap(phase, plan); err != nil {
+						e.display.Warning(fmt.Sprintf("Failed to update state/roadmap: %v", err))
+					}
+
+					// Commit and push all repos
+					planId := fmt.Sprintf("%02d-%s", phase.Number, plan.PlanNumber)
+					e.CommitAndPushRepos(planId)
+				}
 			}
 		}
 	} else if handler.IsBailout() {
 		// Bailout signal - Claude preserved context, check if Progress was updated
 		bailout := handler.GetBailout()
+		// Safe commit before bailout to preserve any work done
+		e.SafeCommitProgress(fmt.Sprintf("bailout: %s", bailout.Detail))
 		progressUpdated := e.verifyProgressUpdated(plan.Path)
 		if progressUpdated {
 			// Soft success - work preserved, can resume
@@ -549,6 +571,8 @@ func (e *Executor) LoopWithAnalysis(ctx context.Context, maxIterations int, skip
 					retryState.Attempts++
 					retryState.LastProgress = extractProgressSection(plan.Path)
 					retryState.LastOutput = result.LastOutput
+					// Safe commit before retry to preserve any progress made
+					e.SafeCommitProgress(fmt.Sprintf("retry %d: %s", retryState.Attempts, plan.Name))
 					e.display.Info("Analysis", fmt.Sprintf("Will retry: %s", sfResult.Reason))
 					// Don't increment completed - this plan will be found again on next iteration
 					continue
@@ -581,17 +605,32 @@ func (e *Executor) buildExecutionPrompt(planPath string) string {
 		return e.buildFallbackExecutionPrompt(planPath)
 	}
 
-	// Add plan path context
-	planContext := fmt.Sprintf(`
+	// Add explicit working directory context to prevent subagent confusion
+	dirContext := fmt.Sprintf(`
+## Working Directory Context
+
+**IMPORTANT: All paths in this execution context are absolute paths.**
+
+| Path | Description |
+|------|-------------|
+| Project Root | %s |
+| Planning Directory | %s |
+| Current Plan | %s |
+
+When spawning subagents (Task tool), always:
+1. Use absolute paths for file references
+2. Subagents inherit the working directory but may lose context - be explicit about paths
+3. Reference files relative to Project Root when documenting, but use absolute paths in tool calls
+
 ## Current Plan
 
 Plan Location: %s
 
 Execute this plan following the executor protocol above.
 
-Begin execution now.`, planPath)
+Begin execution now.`, e.config.WorkDir, e.config.PlanningDir, planPath, planPath)
 
-	return executorPrompt + "\n\n" + planContext
+	return executorPrompt + "\n\n" + dirContext
 }
 
 // buildRalphAugmentations returns Ralph-specific additions to append to GSD workflow
@@ -1082,6 +1121,9 @@ func (e *Executor) runSoftFailureAnalysis(ctx context.Context, phase *types.Phas
 
 // RunPhaseStartAnalysis runs phase-start analysis to bundle manual tasks
 func (e *Executor) RunPhaseStartAnalysis(phase *types.Phase) error {
+	// Safe commit at phase start to capture any lingering work from previous session
+	e.SafeCommitProgress(fmt.Sprintf("phase %d start: %s", phase.Number, phase.Name))
+
 	// Create manual tasks plan (runs LAST - plan 99)
 	created, err := e.MaybeCreateManualTasksPlan(phase)
 	if err != nil {
@@ -1324,6 +1366,8 @@ func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) e
 	}
 
 	// Update current phase and last updated timestamp
+	// Note: CurrentPhase is deprecated - use state.DeriveCurrentPhase() instead
+	// We still update it for backward compatibility with older tools
 	projectState.CurrentPhase = phase.Number
 	projectState.LastUpdated = time.Now()
 
@@ -1390,6 +1434,41 @@ func (e *Executor) updateStateAndRoadmap(phase *types.Phase, plan *types.Plan) e
 	}
 
 	return nil
+}
+
+// SafeCommitProgress commits work-in-progress changes without pushing
+// Used at transition points to preserve progress (bailout, retry, phase start)
+// This is a "soft" commit - it won't fail the operation if git fails
+func (e *Executor) SafeCommitProgress(reason string) {
+	// Check if there are changes to commit
+	statusCmd := exec.Command("git", "-C", e.config.WorkDir, "status", "--porcelain")
+	output, _ := statusCmd.Output()
+	if len(output) == 0 {
+		return // No changes to commit
+	}
+
+	// Stage all changes
+	addCmd := exec.Command("git", "-C", e.config.WorkDir, "add", "-A")
+	if err := addCmd.Run(); err != nil {
+		e.display.Warning(fmt.Sprintf("SafeCommit: failed to stage changes: %v", err))
+		return
+	}
+
+	// Commit with WIP message
+	commitMsg := fmt.Sprintf("wip: %s", reason)
+	commitCmd := exec.Command("git", "-C", e.config.WorkDir, "commit", "-m", commitMsg)
+	if err := commitCmd.Run(); err != nil {
+		e.display.Warning(fmt.Sprintf("SafeCommit: failed to commit: %v", err))
+		return
+	}
+
+	e.display.Info("SafeCommit", fmt.Sprintf("Progress saved: %s", reason))
+
+	// Attempt push but don't fail if it doesn't work
+	pushCmd := exec.Command("git", "-C", e.config.WorkDir, "push")
+	if err := pushCmd.Run(); err != nil {
+		e.display.Warning(fmt.Sprintf("SafeCommit: push failed (changes saved locally): %v", err))
+	}
 }
 
 // CommitAndPushRepos commits and pushes changes in all workspace repos

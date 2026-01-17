@@ -82,16 +82,16 @@ Every task has required fields:
 - Good: "Valid credentials return 200 + JWT cookie, invalid credentials return 401"
 - Bad: "Authentication is complete"
 
-## Task Types
+## Task Types (2 Types Only)
 
 | Type | Use For | Autonomy |
 |------|---------|----------|
 | `auto` | Everything Claude can do independently | Fully autonomous |
-| `checkpoint:human-verify` | Visual/functional verification | Pauses for user |
-| `checkpoint:decision` | Implementation choices | Pauses for user |
-| `manual` | Truly unavoidable manual steps (rare) | Bundled to phase-end |
+| `manual` | Human verification, decisions, or unavoidable manual steps | Bundled to phase-end |
 
-**Automation-first rule:** If Claude CAN do it via CLI/API, Claude MUST do it.
+**IMPORTANT:** Only `auto` and `manual` are valid task types. Do NOT use `checkpoint:human-verify`, `checkpoint:decision`, or any other checkpoint types - these will cause validation errors.
+
+**Automation-first rule:** If Claude CAN do it via CLI/API, Claude MUST do it. Use `manual` only for visual verification, implementation decisions, or truly unavoidable human actions.
 
 ## Task Sizing
 

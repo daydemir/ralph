@@ -55,8 +55,9 @@ Use --verbose for detailed information including decisions and issues.`,
 
 		planningDir := p.PlanningDir()
 
-		// Load state from JSON
-		projectState, err := state.LoadStateJSON(planningDir)
+		// Load state from JSON (validates state.json exists and is valid)
+		// Note: CurrentPhase is deprecated - we derive it from roadmap instead
+		_, err = state.LoadStateJSON(planningDir)
 		if err != nil {
 			// state.json might not exist yet - show error and exit
 			yellow := color.New(color.FgYellow).SprintFunc()
@@ -146,8 +147,10 @@ Use --verbose for detailed information including decisions and issues.`,
 		// Current position
 		fmt.Println(bold("📍 Current Position:"))
 		totalPhases := len(roadmap.Phases)
-		if projectState.CurrentPhase > 0 {
-			fmt.Printf("  Phase: %d of %d\n", projectState.CurrentPhase, totalPhases)
+		// Derive current phase from roadmap (source of truth) instead of state.json
+		currentPhase, _ := state.DeriveCurrentPhase(planningDir)
+		if currentPhase > 0 {
+			fmt.Printf("  Phase: %d of %d\n", currentPhase, totalPhases)
 			if nextPlan != nil {
 				fmt.Printf("  Plan:  %s (next)\n", nextPlan.Name)
 			} else {

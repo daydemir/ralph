@@ -48,7 +48,12 @@ type InvalidTaskTypeError struct {
 }
 
 func (e *InvalidTaskTypeError) Error() string {
-	return "invalid task type '" + e.Type + "'. Valid: auto, manual"
+	suggestion := ""
+	// Suggest migration for common invalid types
+	if strings.Contains(e.Type, "checkpoint:") || strings.Contains(e.Type, "human") {
+		suggestion = " Use type=\"manual\" instead for human verification/decision tasks."
+	}
+	return "invalid task type '" + e.Type + "'. Valid: auto, manual." + suggestion
 }
 
 // ValidatePlanTasks checks that all task types in a plan content are valid.
